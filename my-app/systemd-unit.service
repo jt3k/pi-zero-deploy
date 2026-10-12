@@ -1,0 +1,13 @@
+[Unit]
+Description=My App Service
+After=default.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=2
+Environment="NODE_MODULES=production"
+Environment="CUSTOM_APP_FLAG=active"
+
+[Install]
+WantedBy=default.target

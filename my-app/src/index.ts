@@ -6,7 +6,7 @@ createServer((req, res) => {
   const routes = {
     "/"() {
       res.writeHead(200)
-      res.end(JSON.stringify({ okAY: true }))
+      res.end(JSON.stringify({ ok: true, isSecondDeploy: "yes" }))
     },
     "/health"() {
       res.writeHead(200)

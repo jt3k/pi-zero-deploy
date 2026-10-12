@@ -1,0 +1,19 @@
+[Unit]
+Description=app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/projects/app/current
+ExecStart=/usr/bin/node /home/pi/projects/app/current/server.js
+Restart=always
+RestartSec=2
+Environment="NODE_ENV=production"
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=app
+
+[Install]
+WantedBy=multi-user.target

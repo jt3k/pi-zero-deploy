@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { $ } from "bun";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, extname, join, resolve } from "node:path";
 import { parseArgs } from "util";
 
 const DEFAULT_HOST = "pi@zero.local";
@@ -9,10 +9,10 @@ const REMOTE_PROJECTS_ROOT = "/home/pi/projects";
 const USAGE = "usage: pizdeploy [init|ps|start|stop|restart|status|logs|disable|remove|rm] [name] [--ssh <user@host>] [--dry-run]";
 
 // Верификация службы: прямой запуск Node занимает ~5 с на Pi Zero, таймаут 60 с с запасом.
-// Переменные окружения существуют только чтобы тесты не ждали минуту.
+// Переменные окружения существуют только чтобы тесты не ждали минуту или для кастомной настройки.
 const VERIFY_TIMEOUT_MS = readNumberEnv("PIZDEPLOY_VERIFY_TIMEOUT_MS", 60_000);
-const VERIFY_INTERVAL_MS = readNumberEnv("PIZDEPLOY_VERIFY_INTERVAL_MS", 5_000);
-const STABLE_HOLD_MS = readNumberEnv("PIZDEPLOY_STABLE_HOLD_MS", 20_000);
+const VERIFY_INTERVAL_MS = readNumberEnv("PIZDEPLOY_VERIFY_INTERVAL_MS", 1_000);
+const STABLE_HOLD_MS = readNumberEnv("PIZDEPLOY_STABLE_HOLD_MS", 5_000);
 
 type RemoteResult = { exitCode: number; stdout: string; stderr: string };
 
@@ -21,6 +21,80 @@ function readNumberEnv(name: string, fallback: number): number {
   if (!raw) return fallback;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+export type AutobuildInfo = {
+  entryPath: string;
+  outputFileName: string;
+  execStart: string;
+};
+
+/**
+ * Эвристический разбор scripts.start для автоматической сборки, когда scripts.build отсутствует.
+ * Ищет запускаемый файл, отделяя флаги node и аргументы приложения.
+ */
+export function detectAutobuildEntry(startCmd: string, cwd: string = process.cwd()): AutobuildInfo | null {
+  const trimmed = startCmd.trim();
+  if (!trimmed) return null;
+
+  // Разбиваем команду на аргументы с учётом простых кавычек или пробелов
+  const tokens = trimmed.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [];
+  if (tokens.length === 0) return null;
+
+  // Очищаем токен от внешних кавычек
+  const stripQuotes = (t: string) => t.replace(/^['"](.*)['"]$/, "$1");
+
+  // Первый токен: если это node/bun рантайм, отсекаем его
+  let isNodeRuntime = false;
+  let startIndex = 0;
+  const first = stripQuotes(tokens[0]);
+  if (first === "node" || first.endsWith("/node") || first === "bun" || first.endsWith("/bun")) {
+    isNodeRuntime = true;
+    startIndex = 1;
+  }
+
+  const nodeFlags: string[] = [];
+  let entryToken: string | null = null;
+  let entryTokenIndex = -1;
+
+  for (let i = startIndex; i < tokens.length; i++) {
+    const raw = stripQuotes(tokens[i]);
+    if (raw.startsWith("-")) {
+      nodeFlags.push(raw);
+    } else {
+      entryToken = raw;
+      entryTokenIndex = i;
+      break;
+    }
+  }
+
+  if (!entryToken) return null;
+
+  // Обязательно проверяем расширение: если токена без рантайма, или расширение не JS/TS, то это неизвестный бинарник
+  const ext = extname(entryToken);
+  const recognizedExts = [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx"];
+  if (!ext || !recognizedExts.includes(ext.toLowerCase())) {
+    // Без расширения допустимо только если токен явно указан после `node` и файл реально существует
+    if (!isNodeRuntime || !existsSync(resolve(cwd, entryToken))) {
+      return null;
+    }
+  }
+
+  const baseName = basename(entryToken, ext || undefined);
+  if (!baseName) return null;
+
+  const appArgs = tokens.slice(entryTokenIndex + 1).map(stripQuotes);
+  const outputFileName = `${baseName}.mjs`;
+
+  const nodePrefix = "/usr/bin/node";
+  const execParts = [nodePrefix, ...nodeFlags, outputFileName, ...appArgs];
+  const execStart = execParts.join(" ");
+
+  return {
+    entryPath: entryToken,
+    outputFileName,
+    execStart,
+  };
 }
 
 /** Извлекает и адаптирует команду scripts.start; при отсутствии или пустом значении — undefined. */
@@ -216,6 +290,14 @@ export function renderUnit(
     if (!hasPortEnv) {
       injected.push(`Environment="PORT=${port}"`);
     }
+  }
+
+  // Внедряем дефолтные Restart и RestartSec, если они не заданы явно
+  if (!serviceSec.lines.some((l) => l.trim().startsWith("Restart="))) {
+    injected.push("Restart=always");
+  }
+  if (!serviceSec.lines.some((l) => l.trim().startsWith("RestartSec="))) {
+    injected.push("RestartSec=2");
   }
 
   serviceSec.lines.unshift(...injected);
@@ -691,8 +773,29 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
 
   try {
     // 1. Сборка
-    const buildResult = await $`bun run build`.nothrow();
-    if (buildResult.exitCode !== 0) return buildResult.exitCode;
+    let effectiveExecStart = execStart;
+    const hasCustomBuild = typeof pkg?.scripts?.build === "string" && pkg.scripts.build.trim().length > 0;
+
+    if (hasCustomBuild) {
+      const buildResult = await $`bun run build`.nothrow();
+      if (buildResult.exitCode !== 0) return buildResult.exitCode;
+    } else {
+      const rawStart = (pkg as { scripts?: { start?: string } })?.scripts?.start || "";
+      const autobuild = detectAutobuildEntry(rawStart);
+      if (!autobuild) {
+        console.error(`pizdeploy: в package.json отсутствует скрипт "build", и не удалось определить входной файл из scripts.start: "${rawStart}"`);
+        console.error(`💡 Рекомендация: добавьте скрипт "build" в package.json (например: "build": "bun build ./app.js --target=node --outfile=./dist/app.mjs")`);
+        console.error(`   или укажите прямой путь к запускаемому JS/TS файлу в scripts.start: "node ./app.js".`);
+        return 1;
+      }
+
+      console.log(`🔨 Автоматическая сборка: bun build ${autobuild.entryPath} -> ./dist/${autobuild.outputFileName}`);
+      const buildResult = await $`bun build ${autobuild.entryPath} --target=node --outfile=./dist/${autobuild.outputFileName} --minify`.nothrow();
+      if (buildResult.exitCode !== 0) {
+        return buildResult.exitCode;
+      }
+      effectiveExecStart = autobuild.execStart;
+    }
 
     // 2. Упаковка
     const tarResult = await $`tar -czf ${ARCHIVE} -C ./dist .`.nothrow();
@@ -755,7 +858,7 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     if (switchCode !== 0) return switchCode;
 
     // 10. Запись сгенерированного юнита в каталог пользовательских юнитов
-    const unit = renderUnit(name, execStart, port);
+    const unit = renderUnit(name, effectiveExecStart, port);
     const writeCode = await runStep(
       sshOpts,
       host,
@@ -768,12 +871,12 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     const reloadCode = await runStep(sshOpts, host, "daemon-reload", "systemctl --user daemon-reload");
     if (reloadCode !== 0) return reloadCode;
 
-    // 12. Включаем автозапуск и стартуем
+    // 12. Включаем автозапуск и перезапускаем/стартуем службу
     const enableCode = await runStep(
       sshOpts,
       host,
       "включение службы",
-      `systemctl --user enable --now ${service}`
+      `systemctl --user enable --now ${service} && systemctl --user restart ${service}`
     );
     if (enableCode !== 0) return enableCode;
 
@@ -810,8 +913,9 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
 
     const hostname = host.replace(/^.*@/, "");
     console.log(`🎉 Успешно развернут релиз: ${relId}`);
-    console.log(`   Служба: ${service} (systemctl --user, ${hostname})`);
-    console.log(port ? `   URL: http://${hostname}:${port}` : "   порт не задан (pizdeploy.port) — проверка прослушивания пропущена");
+    if (port) {
+      console.log(`   URL: http://${hostname}:${port}`);
+    }
     return 0;
   } finally {
     // Гарантированная очистка локального архива и закрытие мультиплекс-сессии

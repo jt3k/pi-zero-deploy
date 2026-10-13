@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { renderUnit, resolveExecStart, resolvePort, sshOptions, scpOptions, userFromHost } from "../src/index";
+import { renderUnit, resolveExecStart, resolvePort, sshOptions, scpOptions, userFromHost, detectAutobuildEntry } from "../src/index";
 
 const repoRoot = join(import.meta.dir, "..");
 const entrypoint = join(repoRoot, "src", "index.ts");
@@ -180,6 +180,31 @@ describe("вспомогательные функции", () => {
     expect(resolveExecStart(undefined)).toBeUndefined();
   });
 
+  test("detectAutobuildEntry корректно разбирает команды и пути", () => {
+    expect(detectAutobuildEntry("node app.js")).toEqual({
+      entryPath: "app.js",
+      outputFileName: "app.mjs",
+      execStart: "/usr/bin/node app.mjs",
+    });
+    expect(detectAutobuildEntry("node ./src/server.js")).toEqual({
+      entryPath: "./src/server.js",
+      outputFileName: "server.mjs",
+      execStart: "/usr/bin/node server.mjs",
+    });
+    expect(detectAutobuildEntry("node --inspect --expose-gc src/index.ts")).toEqual({
+      entryPath: "src/index.ts",
+      outputFileName: "index.mjs",
+      execStart: "/usr/bin/node --inspect --expose-gc index.mjs",
+    });
+    expect(detectAutobuildEntry("node app.js --port 8080")).toEqual({
+      entryPath: "app.js",
+      outputFileName: "app.mjs",
+      execStart: "/usr/bin/node app.mjs --port 8080",
+    });
+    expect(detectAutobuildEntry("")).toBeNull();
+    expect(detectAutobuildEntry("some-binary arg")).toBeNull();
+  });
+
   test("деплой проекта без scripts.start прерывается с ошибкой до передачи файлов", () => {
     const sb = makeDeploySandbox({
       packageJson: {
@@ -191,6 +216,41 @@ describe("вспомогательные функции", () => {
 
     expect(res.code).toBe(1);
     expect(res.stderr).toContain("scripts.start");
+    expect(res.calls.length).toBe(0);
+  });
+
+  test("деплой проекта без scripts.build автоматически собирает проект в .mjs", () => {
+    const sb = makeDeploySandbox({
+      packageJson: {
+        name: "micro-app",
+        scripts: { start: "node app.js" },
+      },
+    });
+    writeFileSync(join(sb.base, "app.js"), "console.log('hello');\n");
+
+    const res = deploy({ ...sb, env: { LINGER: "yes" } });
+
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain("🔨 Автоматическая сборка:");
+    expect(res.stdout).toContain("🎉 Успешно развернут релиз:");
+    const unitCall = res.calls.find((c) => c.includes("cat > ~/.config/systemd/user/micro-app.service"));
+    expect(unitCall).toBeDefined();
+    expect(unitCall).toContain("ExecStart=/usr/bin/node app.mjs");
+  });
+
+  test("деплой проекта без scripts.build с нераспознанным start выводит подсказку", () => {
+    const sb = makeDeploySandbox({
+      packageJson: {
+        name: "unknown-app",
+        scripts: { start: "unknown-runner" },
+      },
+    });
+
+    const res = deploy({ ...sb });
+
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("не удалось определить входной файл");
+    expect(res.stderr).toContain("Рекомендация");
     expect(res.calls.length).toBe(0);
   });
 });
@@ -239,10 +299,39 @@ describe("генерация unit-файла", () => {
       expect(unit).toContain("Description=My Custom Telegram Bot");
       expect(unit).toContain("WorkingDirectory=/home/pi/projects/tg-bot/current");
       expect(unit).toContain("ExecStart=/usr/bin/node bot.js");
+      expect(unit).toContain("Restart=always");
+      expect(unit).toContain("RestartSec=2");
       expect(unit).toContain('Environment="BOT_TOKEN=123456:ABC-DEF"');
       expect(unit).toContain('Environment="NODE_ENV=production"');
       expect(unit).not.toContain("PORT=");
       expect(unit).toContain("WantedBy=default.target");
+    } finally {
+      rmSync(tmpTemplate, { force: true });
+    }
+  });
+
+  test("пользовательский шаблон с явными Restart и RestartSec сохраняет пользовательские значения", () => {
+    const tmpTemplate = join(tmpdir(), `custom-restart-${Date.now()}.service`);
+    writeFileSync(
+      tmpTemplate,
+      [
+        "[Unit]",
+        "Description=Explicit Restart Bot",
+        "",
+        "[Service]",
+        "Type=simple",
+        "Restart=on-failure",
+        "RestartSec=5",
+        'Environment="NODE_ENV=production"',
+      ].join("\n")
+    );
+
+    try {
+      const unit = renderUnit("custom-bot", "/usr/bin/node bot.js", undefined, tmpTemplate);
+      expect(unit).toContain("Restart=on-failure");
+      expect(unit).toContain("RestartSec=5");
+      expect(unit).not.toContain("Restart=always");
+      expect(unit).not.toContain("RestartSec=2");
     } finally {
       rmSync(tmpTemplate, { force: true });
     }
@@ -267,6 +356,8 @@ describe("генерация unit-файла", () => {
       const unit = renderUnit("new-service", "/usr/bin/node server.js", undefined, tmpTemplate);
       expect(unit).toContain("WorkingDirectory=/home/pi/projects/new-service/current");
       expect(unit).toContain("ExecStart=/usr/bin/node server.js");
+      expect(unit).toContain("Restart=always");
+      expect(unit).toContain("RestartSec=2");
       expect(unit).not.toContain("/old/path");
       expect(unit).not.toContain("/old/bin/start.sh");
       expect(unit).toContain('Environment="KEY=value"');
@@ -509,7 +600,7 @@ describe("верификация работоспособности", () => {
     expect(res.stderr).toContain("перезапустилась");
   });
 
-  test("успешный вывод содержит имя службы и URL", () => {
+  test("успешный вывод содержит URL при наличии порта и не содержит строку службы", () => {
     const sb = makeDeploySandbox({
       packageJson: {
         name: "myapp",
@@ -523,16 +614,35 @@ describe("верификация работоспособности", () => {
     const res = deploy({ ...sb, env: { LINGER: "yes" } });
 
     expect(res.code).toBe(0);
-    expect(res.stdout).toContain("myapp.service");
-    expect(res.stdout).toContain("http://zero.local:1234");
+    expect(res.stdout).toContain("🎉 Успешно развернут релиз:");
+    expect(res.stdout).toContain("URL: http://zero.local:1234");
+    expect(res.stdout).not.toContain("Служба:");
   });
 
-  test("без порта вывод помечает пропуск проверки", () => {
+  test("без порта вывод не содержит строку службы и сообщение о пропуске проверки", () => {
     const sb = makeDeploySandbox();
     const res = deploy({ ...sb, env: { LINGER: "yes" } });
 
     expect(res.code).toBe(0);
-    expect(res.stdout).toContain("myapp.service");
-    expect(res.stdout).toContain("порт не задан");
+    expect(res.stdout).toContain("🎉 Успешно развернут релиз:");
+    expect(res.stdout).not.toContain("Служба:");
+    expect(res.stdout).not.toContain("порт не задан");
+    expect(res.stdout).not.toContain("URL:");
+  });
+
+  test("переменные окружения PIZDEPLOY_VERIFY_INTERVAL_MS и PIZDEPLOY_STABLE_HOLD_MS ускоряют верификацию", () => {
+    const sb = makeDeploySandbox();
+    const res = deploy({
+      ...sb,
+      env: {
+        LINGER: "yes",
+        PIZDEPLOY_VERIFY_TIMEOUT_MS: "500",
+        PIZDEPLOY_VERIFY_INTERVAL_MS: "50",
+        PIZDEPLOY_STABLE_HOLD_MS: "50",
+      },
+    });
+
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain("🎉 Успешно развернут релиз:");
   });
 });

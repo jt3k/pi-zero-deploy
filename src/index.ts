@@ -1,18 +1,19 @@
 #!/usr/bin/env bun
-import { $ } from "bun";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, extname, join, resolve } from "node:path";
-import { parseArgs } from "util";
+import { $ } from 'bun';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, extname, resolve } from 'node:path';
+import { parseArgs } from 'util';
 
-const DEFAULT_HOST = "pi@zero.local";
-const REMOTE_PROJECTS_ROOT = "/home/pi/projects";
-const USAGE = "usage: pizdeploy [init|ps|start|stop|restart|status|logs|disable|remove|rm] [name] [--ssh <user@host>] [--dry-run]";
+const DEFAULT_HOST = 'pi@zero.local';
+const REMOTE_PROJECTS_ROOT = '/home/pi/projects';
+const USAGE =
+  'usage: pizdeploy [init|ps|start|stop|restart|status|logs|disable|remove|rm] [name] [--ssh <user@host>] [--dry-run]';
 
 // Верификация службы: прямой запуск Node занимает ~5 с на Pi Zero, таймаут 60 с с запасом.
 // Переменные окружения существуют только чтобы тесты не ждали минуту или для кастомной настройки.
-const VERIFY_TIMEOUT_MS = readNumberEnv("PIZDEPLOY_VERIFY_TIMEOUT_MS", 60_000);
-const VERIFY_INTERVAL_MS = readNumberEnv("PIZDEPLOY_VERIFY_INTERVAL_MS", 1_000);
-const STABLE_HOLD_MS = readNumberEnv("PIZDEPLOY_STABLE_HOLD_MS", 5_000);
+const VERIFY_TIMEOUT_MS = readNumberEnv('PIZDEPLOY_VERIFY_TIMEOUT_MS', 60_000);
+const VERIFY_INTERVAL_MS = readNumberEnv('PIZDEPLOY_VERIFY_INTERVAL_MS', 1_000);
+const STABLE_HOLD_MS = readNumberEnv('PIZDEPLOY_STABLE_HOLD_MS', 5_000);
 
 type RemoteResult = { exitCode: number; stdout: string; stderr: string };
 
@@ -33,7 +34,10 @@ export type AutobuildInfo = {
  * Эвристический разбор scripts.start для автоматической сборки, когда scripts.build отсутствует.
  * Ищет запускаемый файл, отделяя флаги node и аргументы приложения.
  */
-export function detectAutobuildEntry(startCmd: string, cwd: string = process.cwd()): AutobuildInfo | null {
+export function detectAutobuildEntry(
+  startCmd: string,
+  cwd: string = process.cwd(),
+): AutobuildInfo | null {
   const trimmed = startCmd.trim();
   if (!trimmed) return null;
 
@@ -42,13 +46,13 @@ export function detectAutobuildEntry(startCmd: string, cwd: string = process.cwd
   if (tokens.length === 0) return null;
 
   // Очищаем токен от внешних кавычек
-  const stripQuotes = (t: string) => t.replace(/^['"](.*)['"]$/, "$1");
+  const stripQuotes = (t: string) => t.replace(/^['"](.*)['"]$/, '$1');
 
   // Первый токен: если это node/bun рантайм, отсекаем его
   let isNodeRuntime = false;
   let startIndex = 0;
   const first = stripQuotes(tokens[0]);
-  if (first === "node" || first.endsWith("/node") || first === "bun" || first.endsWith("/bun")) {
+  if (first === 'node' || first.endsWith('/node') || first === 'bun' || first.endsWith('/bun')) {
     isNodeRuntime = true;
     startIndex = 1;
   }
@@ -59,7 +63,7 @@ export function detectAutobuildEntry(startCmd: string, cwd: string = process.cwd
 
   for (let i = startIndex; i < tokens.length; i++) {
     const raw = stripQuotes(tokens[i]);
-    if (raw.startsWith("-")) {
+    if (raw.startsWith('-')) {
       nodeFlags.push(raw);
     } else {
       entryToken = raw;
@@ -72,7 +76,7 @@ export function detectAutobuildEntry(startCmd: string, cwd: string = process.cwd
 
   // Обязательно проверяем расширение: если токена без рантайма, или расширение не JS/TS, то это неизвестный бинарник
   const ext = extname(entryToken);
-  const recognizedExts = [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx"];
+  const recognizedExts = ['.js', '.mjs', '.cjs', '.ts', '.mts', '.cts', '.jsx', '.tsx'];
   if (!ext || !recognizedExts.includes(ext.toLowerCase())) {
     // Без расширения допустимо только если токен явно указан после `node` и файл реально существует
     if (!isNodeRuntime || !existsSync(resolve(cwd, entryToken))) {
@@ -86,9 +90,9 @@ export function detectAutobuildEntry(startCmd: string, cwd: string = process.cwd
   const appArgs = tokens.slice(entryTokenIndex + 1).map(stripQuotes);
   const outputFileName = `${baseName}.mjs`;
 
-  const nodePrefix = "/usr/bin/node";
+  const nodePrefix = '/usr/bin/node';
   const execParts = [nodePrefix, ...nodeFlags, outputFileName, ...appArgs];
-  const execStart = execParts.join(" ");
+  const execStart = execParts.join(' ');
 
   return {
     entryPath: entryToken,
@@ -100,66 +104,67 @@ export function detectAutobuildEntry(startCmd: string, cwd: string = process.cwd
 /** Извлекает и адаптирует команду scripts.start; при отсутствии или пустом значении — undefined. */
 export function resolveExecStart(pkg: unknown): string | undefined {
   const raw = (pkg as { scripts?: { start?: unknown } })?.scripts?.start;
-  if (typeof raw !== "string") return undefined;
+  if (typeof raw !== 'string') return undefined;
   const trimmed = raw.trim();
   if (!trimmed) return undefined;
 
   // Адаптируем пути вида dist/... -> ... потому что WorkingDirectory указывает на распакованный dist
-  let cmd = trimmed.replace(/\bdist\//g, "");
+  let cmd = trimmed.replace(/\bdist\//g, '');
 
   // Нормализуем node -> /usr/bin/node для абсолютного пути в systemd ExecStart
-  if (cmd.startsWith("node ") || cmd === "node") {
-    cmd = "/usr/bin/" + cmd;
+  if (cmd.startsWith('node ') || cmd === 'node') {
+    cmd = '/usr/bin/' + cmd;
   }
 
   return cmd;
 }
 
 function normalizeService(name: string): string {
-  return name.endsWith(".service") ? name : `${name}.service`;
+  return name.endsWith('.service') ? name : `${name}.service`;
 }
 
 /** Читае необязательный `pizdeploy.port`; при отсутствии — undefined. */
 export function resolvePort(pkg: unknown): number | undefined {
   const raw = (pkg as { pizdeploy?: { port?: unknown } })?.pizdeploy?.port;
-  const port = typeof raw === "string" ? Number(raw) : typeof raw === "number" ? raw : Number.NaN;
+  const port = typeof raw === 'string' ? Number(raw) : typeof raw === 'number' ? raw : Number.NaN;
   return Number.isInteger(port) && port > 0 && port <= 65535 ? port : undefined;
 }
 
 /** Имя пользователя, под которым идём по SSH (для linger). */
 export function userFromHost(host: string): string | undefined {
-  const at = host.lastIndexOf("@");
+  const at = host.lastIndexOf('@');
   return at === -1 ? undefined : host.slice(0, at);
 }
 
 function socketPathFor(host: string): string {
-  return `/tmp/pizdeploy-${Buffer.from(host).toString("hex").slice(0, 16)}.sock`;
+  return `/tmp/pizdeploy-${Buffer.from(host).toString('hex').slice(0, 16)}.sock`;
 }
 
 /** Общие опции `ssh`: нережимный вход + переиспользование соединения через ControlMaster. */
 export function sshOptions(host: string, socketPath: string): string[] {
   const opts = [
-    "-o", "BatchMode=yes",
-    "-o", "ConnectTimeout=3",
-    "-o", "ControlMaster=auto",
-    "-o", `ControlPath=${socketPath}`,
-    "-o", "ControlPersist=10s",
+    '-o',
+    'BatchMode=yes',
+    '-o',
+    'ConnectTimeout=3',
+    '-o',
+    'ControlMaster=auto',
+    '-o',
+    `ControlPath=${socketPath}`,
+    '-o',
+    'ControlPersist=10s',
   ];
-  if (!host.includes(":")) {
-    opts.push("-o", "AddressFamily=inet");
+  if (!host.includes(':')) {
+    opts.push('-o', 'AddressFamily=inet');
   }
   return opts;
 }
 
 /** Опции `scp`: то же соединение, но мастер поднимает `ssh`. */
 export function scpOptions(host: string, socketPath: string): string[] {
-  const opts = [
-    "-o", "BatchMode=yes",
-    "-o", "ConnectTimeout=3",
-    "-o", `ControlPath=${socketPath}`,
-  ];
-  if (!host.includes(":")) {
-    opts.push("-o", "AddressFamily=inet");
+  const opts = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=3', '-o', `ControlPath=${socketPath}`];
+  if (!host.includes(':')) {
+    opts.push('-o', 'AddressFamily=inet');
   }
   return opts;
 }
@@ -169,14 +174,14 @@ export function scpOptions(host: string, socketPath: string): string[] {
  * конвейера не печатали в stdout утилиты, и проверяется код возврата.
  */
 async function remoteExec(sshOpts: string[], host: string, command: string): Promise<RemoteResult> {
-  const proc = Bun.spawnSync(["ssh", ...sshOpts, host, command], {
-    stdout: "pipe",
-    stderr: "pipe",
+  const proc = Bun.spawnSync(['ssh', ...sshOpts, host, command], {
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
   return {
     exitCode: proc.exitCode ?? 1,
-    stdout: proc.stdout?.toString() ?? "",
-    stderr: proc.stderr?.toString() ?? "",
+    stdout: proc.stdout?.toString() ?? '',
+    stderr: proc.stderr?.toString() ?? '',
   };
 }
 
@@ -189,11 +194,11 @@ async function runStep(
   sshOpts: string[],
   host: string,
   label: string,
-  command: string
+  command: string,
 ): Promise<number> {
   const res = await remoteExec(sshOpts, host, command);
   if (res.exitCode !== 0) {
-    const reason = res.stderr.trim() || res.stdout.trim() || "сообщение не получено";
+    const reason = res.stderr.trim() || res.stdout.trim() || 'сообщение не получено';
     console.error(`pizdeploy: шаг «${label}» завершился с кодом ${res.exitCode}: ${reason}`);
     return res.exitCode || 1;
   }
@@ -208,32 +213,32 @@ export function renderUnit(
   name: string,
   execStart: string,
   port?: number,
-  customTemplatePath?: string
+  customTemplatePath?: string,
 ): string {
-  let templateContent = "";
-  const projectTemplate = customTemplatePath || resolve(process.cwd(), "systemd-unit.service");
-  const fallbackTemplate = resolve(import.meta.dir, "..", "systemd-unit.service");
+  let templateContent: string;
+  const projectTemplate = customTemplatePath || resolve(process.cwd(), 'systemd-unit.service');
+  const fallbackTemplate = resolve(import.meta.dir, '..', 'systemd-unit.service');
 
   if (existsSync(projectTemplate)) {
-    templateContent = readFileSync(projectTemplate, "utf8");
+    templateContent = readFileSync(projectTemplate, 'utf8');
   } else if (existsSync(fallbackTemplate)) {
-    templateContent = readFileSync(fallbackTemplate, "utf8");
+    templateContent = readFileSync(fallbackTemplate, 'utf8');
   } else {
     // Резервный встроенный шаблон на случай сборки в бинарник без внешних файлов
     templateContent = [
-      "[Unit]",
+      '[Unit]',
       `Description=${name}`,
-      "After=default.target",
-      "",
-      "[Service]",
-      "Type=simple",
-      "Restart=always",
-      "RestartSec=2",
+      'After=default.target',
+      '',
+      '[Service]',
+      'Type=simple',
+      'Restart=always',
+      'RestartSec=2',
       'Environment="NODE_ENV=production"',
-      "",
-      "[Install]",
-      "WantedBy=default.target",
-    ].join("\n");
+      '',
+      '[Install]',
+      'WantedBy=default.target',
+    ].join('\n');
   }
 
   // Разбор на секции INI
@@ -242,7 +247,7 @@ export function renderUnit(
 
   for (const rawLine of templateContent.split(/\r?\n/)) {
     const trimmed = rawLine.trim();
-    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
       currentSection = { name: trimmed, lines: [] };
       sections.push(currentSection);
     } else if (currentSection && trimmed.length > 0) {
@@ -251,25 +256,25 @@ export function renderUnit(
   }
 
   // 1. Секция [Unit]
-  let unitSec = sections.find((s) => s.name.toLowerCase() === "[unit]");
+  let unitSec = sections.find((s) => s.name.toLowerCase() === '[unit]');
   if (!unitSec) {
-    unitSec = { name: "[Unit]", lines: [`Description=${name}`, "After=default.target"] };
+    unitSec = { name: '[Unit]', lines: [`Description=${name}`, 'After=default.target'] };
     sections.unshift(unitSec);
   } else {
-    const descIdx = unitSec.lines.findIndex((l) => l.trim().startsWith("Description="));
+    const descIdx = unitSec.lines.findIndex((l) => l.trim().startsWith('Description='));
     if (descIdx === -1) {
       unitSec.lines.unshift(`Description=${name}`);
-    } else if (unitSec.lines[descIdx].trim() === "Description=app" && name !== "app") {
+    } else if (unitSec.lines[descIdx].trim() === 'Description=app' && name !== 'app') {
       unitSec.lines[descIdx] = `Description=${name}`;
     }
   }
 
   // 2. Секция [Service]
-  let serviceSec = sections.find((s) => s.name.toLowerCase() === "[service]");
+  let serviceSec = sections.find((s) => s.name.toLowerCase() === '[service]');
   if (!serviceSec) {
     serviceSec = {
-      name: "[Service]",
-      lines: ["Type=simple", "Restart=always", "RestartSec=2", 'Environment="NODE_ENV=production"'],
+      name: '[Service]',
+      lines: ['Type=simple', 'Restart=always', 'RestartSec=2', 'Environment="NODE_ENV=production"'],
     };
     sections.push(serviceSec);
   }
@@ -277,7 +282,7 @@ export function renderUnit(
   // Фильтруем любые старые WorkingDirectory= и ExecStart=
   serviceSec.lines = serviceSec.lines.filter((l) => {
     const t = l.trim();
-    return !t.startsWith("WorkingDirectory=") && !t.startsWith("ExecStart=");
+    return !t.startsWith('WorkingDirectory=') && !t.startsWith('ExecStart=');
   });
 
   // Внедряем актуальные WorkingDirectory и ExecStart
@@ -293,24 +298,24 @@ export function renderUnit(
   }
 
   // Внедряем дефолтные Restart и RestartSec, если они не заданы явно
-  if (!serviceSec.lines.some((l) => l.trim().startsWith("Restart="))) {
-    injected.push("Restart=always");
+  if (!serviceSec.lines.some((l) => l.trim().startsWith('Restart='))) {
+    injected.push('Restart=always');
   }
-  if (!serviceSec.lines.some((l) => l.trim().startsWith("RestartSec="))) {
-    injected.push("RestartSec=2");
+  if (!serviceSec.lines.some((l) => l.trim().startsWith('RestartSec='))) {
+    injected.push('RestartSec=2');
   }
 
   serviceSec.lines.unshift(...injected);
 
   // 3. Секция [Install]
-  let installSec = sections.find((s) => s.name.toLowerCase() === "[install]");
+  let installSec = sections.find((s) => s.name.toLowerCase() === '[install]');
   if (!installSec) {
-    installSec = { name: "[Install]", lines: ["WantedBy=default.target"] };
+    installSec = { name: '[Install]', lines: ['WantedBy=default.target'] };
     sections.push(installSec);
   } else {
-    const hasWantedBy = installSec.lines.some((l) => l.trim().startsWith("WantedBy="));
+    const hasWantedBy = installSec.lines.some((l) => l.trim().startsWith('WantedBy='));
     if (!hasWantedBy) {
-      installSec.lines.push("WantedBy=default.target");
+      installSec.lines.push('WantedBy=default.target');
     }
   }
 
@@ -321,10 +326,10 @@ export function renderUnit(
     for (const line of sec.lines) {
       resultLines.push(line);
     }
-    resultLines.push("");
+    resultLines.push('');
   }
 
-  return resultLines.join("\n").replace(/\n+$/, "\n");
+  return resultLines.join('\n').replace(/\n+$/, '\n');
 }
 
 /**
@@ -334,20 +339,20 @@ export function renderUnit(
 async function ensureLinger(sshOpts: string[], host: string, user: string): Promise<number> {
   const property = `loginctl show-user ${user} --property=Linger`;
   const before = await remoteExec(sshOpts, host, property);
-  if (before.stdout.includes("Linger=yes")) return 0;
+  if (before.stdout.includes('Linger=yes')) return 0;
 
   const enable = await remoteExec(sshOpts, host, `loginctl enable-linger ${user}`);
   if (enable.exitCode !== 0) {
     console.error(
       `pizdeploy: не удалось включить автозапуск сессии пользователя ${user}: ${
         enable.stderr.trim() || `код ${enable.exitCode}`
-      }`
+      }`,
     );
     return enable.exitCode || 1;
   }
 
   const after = await remoteExec(sshOpts, host, property);
-  if (!after.stdout.includes("Linger=yes")) {
+  if (!after.stdout.includes('Linger=yes')) {
     console.error(`pizdeploy: автозапуск сессии ${user} остался выключенным (ожидался Linger=yes)`);
     return 1;
   }
@@ -356,7 +361,11 @@ async function ensureLinger(sshOpts: string[], host: string, user: string): Prom
 }
 
 async function readRestarts(sshOpts: string[], host: string, service: string): Promise<number> {
-  const res = await remoteExec(sshOpts, host, `systemctl --user show ${service} -p NRestarts --value`);
+  const res = await remoteExec(
+    sshOpts,
+    host,
+    `systemctl --user show ${service} -p NRestarts --value`,
+  );
   const value = Number.parseInt(res.stdout.trim(), 10);
   return Number.isFinite(value) ? value : 0;
 }
@@ -373,7 +382,7 @@ async function verifyService(
   sshOpts: string[],
   host: string,
   service: string,
-  port: number | undefined
+  port: number | undefined,
 ): Promise<{ ok: boolean; reason: string }> {
   const deadline = Date.now() + VERIFY_TIMEOUT_MS;
   const timeoutSec = Math.round(VERIFY_TIMEOUT_MS / 1000);
@@ -381,7 +390,7 @@ async function verifyService(
   let active = false;
   for (;;) {
     const res = await remoteExec(sshOpts, host, `systemctl --user is-active ${service}`);
-    if (res.stdout.trim() === "active") {
+    if (res.stdout.trim() === 'active') {
       active = true;
       break;
     }
@@ -389,24 +398,27 @@ async function verifyService(
     await Bun.sleep(VERIFY_INTERVAL_MS);
   }
   if (!active) {
-    return { ok: false, reason: `служба ${service} не перешла в состояние active за ${timeoutSec} с` };
+    return {
+      ok: false,
+      reason: `служба ${service} не перешла в состояние active за ${timeoutSec} с`,
+    };
   }
 
   if (port) {
     for (;;) {
       const res = await remoteExec(sshOpts, host, portListenCheck(port));
-      if (res.exitCode === 0) return { ok: true, reason: "" };
+      if (res.exitCode === 0) return { ok: true, reason: '' };
       if (Date.now() >= deadline) break;
       await Bun.sleep(VERIFY_INTERVAL_MS);
     }
     const seen = await remoteExec(
       sshOpts,
       host,
-      `ss -tln 2>/dev/null | awk 'NR>1 {print $4}' | tr '\\n' ' '`
+      `ss -tln 2>/dev/null | awk 'NR>1 {print $4}' | tr '\\n' ' '`,
     );
     return {
       ok: false,
-      reason: `порт ${port} никто не слушает; на хосте прослушиваются: ${seen.stdout.trim() || "ничего"}`,
+      reason: `порт ${port} никто не слушает; на хосте прослушиваются: ${seen.stdout.trim() || 'ничего'}`,
     };
   }
 
@@ -419,49 +431,42 @@ async function verifyService(
       reason: `служба перезапустилась за выдержку (${before} → ${after} перезапусков) — приложение падает`,
     };
   }
-  return { ok: true, reason: "" };
+  return { ok: true, reason: '' };
 }
 
 export type ServiceAction =
-  | "start"
-  | "stop"
-  | "restart"
-  | "status"
-  | "logs"
-  | "disable"
-  | "remove"
-  | "rm";
+  'start' | 'stop' | 'restart' | 'status' | 'logs' | 'disable' | 'remove' | 'rm';
 
 export async function handleServiceControl(
   host: string,
   action: ServiceAction,
   service: string,
-  projectName?: string
+  projectName?: string,
 ): Promise<number> {
   const socketPath = socketPathFor(host);
   const sshOpts = sshOptions(host, socketPath);
 
   try {
-    if (action === "status") {
+    if (action === 'status') {
       const res = await remoteExec(sshOpts, host, `systemctl --user status ${service}`);
       if (res.stdout) console.log(res.stdout.trimEnd());
       if (res.stderr) console.error(res.stderr.trimEnd());
       return res.exitCode;
     }
 
-    if (action === "logs") {
+    if (action === 'logs') {
       const res = await remoteExec(
         sshOpts,
         host,
-        `journalctl --user -u ${service} -n 50 --no-pager`
+        `journalctl --user -u ${service} -n 50 --no-pager`,
       );
       if (res.stdout) console.log(res.stdout.trimEnd());
       if (res.stderr) console.error(res.stderr.trimEnd());
       return res.exitCode;
     }
 
-    if (action === "remove" || action === "rm") {
-      const proj = projectName || service.replace(/\.service$/, "");
+    if (action === 'remove' || action === 'rm') {
+      const proj = projectName || service.replace(/\.service$/, '');
       const remoteCmd = `
 systemctl --user stop ${service} 2>/dev/null || true
 systemctl --user disable ${service} 2>/dev/null || true
@@ -481,7 +486,7 @@ rm -f ${REMOTE_PROJECTS_ROOT}/${proj}/current
     const remoteCmd = `if systemctl --user cat ${service} >/dev/null 2>&1; then systemctl --user ${action} ${service}; else echo "not_found"; exit 1; fi`;
     const res = await remoteExec(sshOpts, host, remoteCmd);
     if (res.exitCode !== 0) {
-      if (res.stdout.includes("not_found")) {
+      if (res.stdout.includes('not_found')) {
         console.error(`pizdeploy: служба ${service} не найдена на ${host}`);
       } else {
         console.error(res.stderr.trim() || `Ошибка при выполнении ${action} ${service}`);
@@ -489,13 +494,13 @@ rm -f ${REMOTE_PROJECTS_ROOT}/${proj}/current
       return res.exitCode || 1;
     }
 
-    if (action === "start") {
+    if (action === 'start') {
       console.log(`▶️ Служба ${service} запущена на ${host}`);
-    } else if (action === "stop") {
+    } else if (action === 'stop') {
       console.log(`⏹ Служба ${service} остановлена на ${host}`);
-    } else if (action === "restart") {
+    } else if (action === 'restart') {
       console.log(`🔄 Служба ${service} перезапущена на ${host}`);
-    } else if (action === "disable") {
+    } else if (action === 'disable') {
       console.log(`🛑 Автозапуск службы ${service} отключен на ${host}`);
     }
     return 0;
@@ -565,7 +570,7 @@ export async function handlePs(host: string): Promise<number> {
   try {
     const res = await remoteExec(sshOpts, host, remoteBashScript);
     if (res.exitCode !== 0) {
-      console.error(res.stderr.trim() || "Ошибка при получении статуса сервисов");
+      console.error(res.stderr.trim() || 'Ошибка при получении статуса сервисов');
       return res.exitCode || 1;
     }
     const rawText = res.stdout.trim();
@@ -578,19 +583,19 @@ export async function handlePs(host: string): Promise<number> {
     }> = [];
 
     try {
-      data = JSON.parse(rawText || "[]");
+      data = JSON.parse(rawText || '[]');
     } catch {
       // При получении не-JSON ответа (например, в тестовых заглушках)
       data = [];
     }
 
-    const hostname = host.replace(/^.*@/, "");
+    const hostname = host.replace(/^.*@/, '');
     const rows = data.map((item) => ({
       Project: item.project,
       Release: item.release,
       Status: item.status,
-      URL: item.port ? `http://${hostname}:${item.port}` : "-",
-      PID: item.pid || "-",
+      URL: item.port ? `http://${hostname}:${item.port}` : '-',
+      PID: item.pid || '-',
     }));
 
     console.table(rows);
@@ -601,23 +606,27 @@ export async function handlePs(host: string): Promise<number> {
 }
 
 export async function handleInit(cwd: string = process.cwd()): Promise<number> {
-  const pkgPath = resolve(cwd, "package.json");
+  const pkgPath = resolve(cwd, 'package.json');
   if (!existsSync(pkgPath)) {
-    console.error("pizdeploy: в текущем каталоге не найден package.json.");
-    console.error("Команда init предназначена для проектов с package.json, откуда берутся имя сервиса, скрипт запуска (scripts.start) и параметры хоста.");
+    console.error('pizdeploy: в текущем каталоге не найден package.json.');
+    console.error(
+      'Команда init предназначена для проектов с package.json, откуда берутся имя сервиса, скрипт запуска (scripts.start) и параметры хоста.',
+    );
     return 1;
   }
 
-  const targetFile = resolve(cwd, "systemd-unit.service");
+  const targetFile = resolve(cwd, 'systemd-unit.service');
   if (existsSync(targetFile)) {
-    console.log("ℹ️ Файл systemd-unit.service уже существует в текущем каталоге. Пропускаем создание.");
+    console.log(
+      'ℹ️ Файл systemd-unit.service уже существует в текущем каталоге. Пропускаем создание.',
+    );
     return 0;
   }
 
-  let pkgName = "app";
+  let pkgName = 'app';
   try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-    if (pkg && typeof pkg.name === "string" && pkg.name.trim()) {
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+    if (pkg && typeof pkg.name === 'string' && pkg.name.trim()) {
       pkgName = pkg.name.trim();
     }
   } catch {
@@ -625,69 +634,68 @@ export async function handleInit(cwd: string = process.cwd()): Promise<number> {
   }
 
   const content = [
-    "[Unit]",
+    '[Unit]',
     `Description=${pkgName}`,
-    "After=default.target",
-    "",
-    "[Service]",
-    "Type=simple",
-    "Restart=always",
-    "RestartSec=2",
+    'After=default.target',
+    '',
+    '[Service]',
+    'Type=simple',
+    'Restart=always',
+    'RestartSec=2',
     'Environment="NODE_ENV=production"',
-    "# Добавьте переменные окружения и секреты:",
+    '# Добавьте переменные окружения и секреты:',
     '# Environment="BOT_TOKEN=..."',
-    "",
-    "[Install]",
-    "WantedBy=default.target",
-    "",
-  ].join("\n");
+    '',
+    '[Install]',
+    'WantedBy=default.target',
+    '',
+  ].join('\n');
 
-  writeFileSync(targetFile, content, "utf8");
+  writeFileSync(targetFile, content, 'utf8');
   console.log(`✨ Создан шаблон systemd-unit.service для "${pkgName}".`);
-  console.log("💡 WorkingDirectory и ExecStart указывать не нужно — pizdeploy настроит их автоматически при деплое.");
+  console.log(
+    '💡 WorkingDirectory и ExecStart указывать не нужно — pizdeploy настроит их автоматически при деплое.',
+  );
   return 0;
 }
 
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
   let flagSsh: string | undefined;
-  let dryRun = false;
-  let command: "deploy" | "ps" | "init" | ServiceAction = "deploy";
+  let dryRun: boolean;
+  let command: 'deploy' | 'ps' | 'init' | ServiceAction;
   let targetServiceArg: string | undefined;
 
   const SERVICE_CMDS: readonly ServiceAction[] = [
-    "start",
-    "stop",
-    "restart",
-    "status",
-    "logs",
-    "disable",
-    "remove",
-    "rm",
+    'start',
+    'stop',
+    'restart',
+    'status',
+    'logs',
+    'disable',
+    'remove',
+    'rm',
   ];
 
   try {
     const parsed = parseArgs({
       args: [...argv],
       options: {
-        ssh: { type: "string" },
-        "dry-run": { type: "boolean" },
+        ssh: { type: 'string' },
+        'dry-run': { type: 'boolean' },
       },
       allowPositionals: true,
       strict: true,
     });
     flagSsh = parsed.values.ssh;
-    dryRun = parsed.values["dry-run"] ?? false;
+    dryRun = parsed.values['dry-run'] ?? false;
     const positionals = parsed.positionals;
     if (positionals.length === 0) {
-      command = "deploy";
-    } else if (positionals.length === 1 && positionals[0] === "init") {
-      command = "init";
-    } else if (positionals.length === 1 && positionals[0] === "ps") {
-      command = "ps";
-    } else if (
-      SERVICE_CMDS.includes(positionals[0] as ServiceAction) &&
-      positionals.length <= 2
-    ) {
+      command = 'deploy';
+    } else if (positionals.length === 1 && positionals[0] === 'init') {
+      command = 'init';
+    } else if (positionals.length === 1 && positionals[0] === 'ps') {
+      command = 'ps';
+    } else if (SERVICE_CMDS.includes(positionals[0] as ServiceAction) && positionals.length <= 2) {
       command = positionals[0] as ServiceAction;
       targetServiceArg = positionals[1];
     } else {
@@ -700,21 +708,23 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
   }
 
   // Подкоманда init: подготовка шаблона службы в текущем каталоге
-  if (command === "init") {
+  if (command === 'init') {
     return await handleInit();
   }
 
-  const pkg = await Bun.file("package.json").json().catch(() => ({}));
+  const pkg = await Bun.file('package.json')
+    .json()
+    .catch(() => ({}));
   const host = flagSsh || pkg?.pizdeploy?.ssh || DEFAULT_HOST;
-  const name: string = pkg?.name || "app";
+  const name: string = pkg?.name || 'app';
   const port = resolvePort(pkg);
-  const defaultService = normalizeService(pkg?.pizdeploy?.service || pkg?.name || "app");
+  const defaultService = normalizeService(pkg?.pizdeploy?.service || pkg?.name || 'app');
   const service: string = targetServiceArg ? normalizeService(targetServiceArg) : defaultService;
 
   // Подкоманда ps: опрос состояния удаленных сервисов
-  if (command === "ps") {
-    if (!Bun.which("ssh")) {
-      console.error("pizdeploy: ssh не найден в PATH. Установите OpenSSH.");
+  if (command === 'ps') {
+    if (!Bun.which('ssh')) {
+      console.error('pizdeploy: ssh не найден в PATH. Установите OpenSSH.');
       return 127;
     }
     return await handlePs(host);
@@ -722,11 +732,11 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
 
   // Подкоманды управления службами на хосте
   if (SERVICE_CMDS.includes(command as ServiceAction)) {
-    if (!Bun.which("ssh")) {
-      console.error("pizdeploy: ssh не найден в PATH. Установите OpenSSH.");
+    if (!Bun.which('ssh')) {
+      console.error('pizdeploy: ssh не найден в PATH. Установите OpenSSH.');
       return 127;
     }
-    const projName = targetServiceArg ? targetServiceArg.replace(/\.service$/, "") : name;
+    const projName = targetServiceArg ? targetServiceArg.replace(/\.service$/, '') : name;
     return await handleServiceControl(host, command as ServiceAction, service, projName);
   }
 
@@ -734,7 +744,7 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
   const incomingDir = `${projectDir}/incoming`;
   const releasesDir = `${projectDir}/releases`;
   const currentLink = `${projectDir}/current`;
-  const unitDir = "~/.config/systemd/user";
+  const unitDir = '~/.config/systemd/user';
 
   const execStart = resolveExecStart(pkg);
 
@@ -742,22 +752,24 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
   if (dryRun) {
     const relId = `${name}_mock5`;
     const releaseDir = `${releasesDir}/${relId}`;
-    console.log(`[Dry-Run] Будет запущен bun run build, вычислен хэш архива и развернут релиз в: ${releaseDir}`);
     console.log(
-      `[Dry-Run] Служба ${service} (user-юнит): ${execStart ?? "node index.js"} в ${projectDir}/current, ${
-        port ? `проверка порта ${port}` : "порт не задан — проверка прослушивания пропускается"
-      }`
+      `[Dry-Run] Будет запущен bun run build, вычислен хэш архива и развернут релиз в: ${releaseDir}`,
+    );
+    console.log(
+      `[Dry-Run] Служба ${service} (user-юнит): ${execStart ?? 'node index.js'} в ${projectDir}/current, ${
+        port ? `проверка порта ${port}` : 'порт не задан — проверка прослушивания пропускается'
+      }`,
     );
     return 0;
   }
 
   // Проверка зависимостей
-  if (!Bun.which("ssh")) {
-    console.error("pizdeploy: ssh не найден в PATH. Установите OpenSSH.");
+  if (!Bun.which('ssh')) {
+    console.error('pizdeploy: ssh не найден в PATH. Установите OpenSSH.');
     return 127;
   }
-  if (!Bun.which("scp")) {
-    console.error("pizdeploy: scp не найден в PATH. Установите OpenSSH.");
+  if (!Bun.which('scp')) {
+    console.error('pizdeploy: scp не найден в PATH. Установите OpenSSH.');
     return 127;
   }
 
@@ -766,7 +778,7 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     return 1;
   }
 
-  const ARCHIVE = "./dist.tar.gz";
+  const ARCHIVE = './dist.tar.gz';
   const socketPath = socketPathFor(host);
   const sshOpts = sshOptions(host, socketPath);
   const scpOpts = scpOptions(host, socketPath);
@@ -774,23 +786,33 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
   try {
     // 1. Сборка
     let effectiveExecStart = execStart;
-    const hasCustomBuild = typeof pkg?.scripts?.build === "string" && pkg.scripts.build.trim().length > 0;
+    const hasCustomBuild =
+      typeof pkg?.scripts?.build === 'string' && pkg.scripts.build.trim().length > 0;
 
     if (hasCustomBuild) {
       const buildResult = await $`bun run build`.nothrow();
       if (buildResult.exitCode !== 0) return buildResult.exitCode;
     } else {
-      const rawStart = (pkg as { scripts?: { start?: string } })?.scripts?.start || "";
+      const rawStart = (pkg as { scripts?: { start?: string } })?.scripts?.start || '';
       const autobuild = detectAutobuildEntry(rawStart);
       if (!autobuild) {
-        console.error(`pizdeploy: в package.json отсутствует скрипт "build", и не удалось определить входной файл из scripts.start: "${rawStart}"`);
-        console.error(`💡 Рекомендация: добавьте скрипт "build" в package.json (например: "build": "bun build ./app.js --target=node --outfile=./dist/app.mjs")`);
-        console.error(`   или укажите прямой путь к запускаемому JS/TS файлу в scripts.start: "node ./app.js".`);
+        console.error(
+          `pizdeploy: в package.json отсутствует скрипт "build", и не удалось определить входной файл из scripts.start: "${rawStart}"`,
+        );
+        console.error(
+          `💡 Рекомендация: добавьте скрипт "build" в package.json (например: "build": "bun build ./app.js --target=node --outfile=./dist/app.mjs")`,
+        );
+        console.error(
+          `   или укажите прямой путь к запускаемому JS/TS файлу в scripts.start: "node ./app.js".`,
+        );
         return 1;
       }
 
-      console.log(`🔨 Автоматическая сборка: bun build ${autobuild.entryPath} -> ./dist/${autobuild.outputFileName}`);
-      const buildResult = await $`bun build ${autobuild.entryPath} --target=node --outfile=./dist/${autobuild.outputFileName} --minify`.nothrow();
+      console.log(
+        `🔨 Автоматическая сборка: bun build ${autobuild.entryPath} -> ./dist/${autobuild.outputFileName}`,
+      );
+      const buildResult =
+        await $`bun build ${autobuild.entryPath} --target=node --outfile=./dist/${autobuild.outputFileName} --minify`.nothrow();
       if (buildResult.exitCode !== 0) {
         return buildResult.exitCode;
       }
@@ -802,30 +824,39 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     if (tarResult.exitCode !== 0) return tarResult.exitCode;
 
     // 3. Хэш SHA-256 от архива
-    const hasher = new Bun.CryptoHasher("sha256");
+    const hasher = new Bun.CryptoHasher('sha256');
     hasher.update(await Bun.file(ARCHIVE).bytes());
-    const hash5 = hasher.digest("hex").slice(0, 5);
+    const hash5 = hasher.digest('hex').slice(0, 5);
 
     const relId = `${name}_${hash5}`;
     const releaseDir = `${releasesDir}/${relId}`;
 
     // 4. Подготовка директорий incoming и releases на хосте (инициализирует ControlMaster)
-    const mkdirCode = await runStep(sshOpts, host, "подготовка каталогов", `mkdir -p ${incomingDir} ${releasesDir}`);
+    const mkdirCode = await runStep(
+      sshOpts,
+      host,
+      'подготовка каталогов',
+      `mkdir -p ${incomingDir} ${releasesDir}`,
+    );
     if (mkdirCode !== 0) return mkdirCode;
 
     // 5. Копирование архива в буфер incoming (по открытому сокету)
-    const scpResult = await $`scp ${scpOpts} ${ARCHIVE} ${host + ":" + incomingDir + "/dist.tar.gz"}`
-      .quiet()
-      .nothrow();
+    const scpResult =
+      await $`scp ${scpOpts} ${ARCHIVE} ${host + ':' + incomingDir + '/dist.tar.gz'}`
+        .quiet()
+        .nothrow();
     if (scpResult.exitCode !== 0) {
-      console.error(`pizdeploy: не удалось передать архив на ${host}: ${scpResult.stderr.toString().trim()}`);
+      console.error(
+        `pizdeploy: не удалось передать архив на ${host}: ${scpResult.stderr.toString().trim()}`,
+      );
       return scpResult.exitCode;
     }
 
     // 6. Автозапуск пользовательской сессии (лениво, перед установкой юнита)
-    const remoteUser = userFromHost(host) ?? (await remoteExec(sshOpts, host, "id -un")).stdout.trim();
+    const remoteUser =
+      userFromHost(host) ?? (await remoteExec(sshOpts, host, 'id -un')).stdout.trim();
     if (!remoteUser) {
-      console.error("pizdeploy: не удалось определить пользователя на целевом хосте");
+      console.error('pizdeploy: не удалось определить пользователя на целевом хосте');
       return 1;
     }
     const lingerCode = await ensureLinger(sshOpts, host, remoteUser);
@@ -835,8 +866,8 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     const extractCode = await runStep(
       sshOpts,
       host,
-      "распаковка релиза",
-      `mkdir -p ${releaseDir} && tar -xzf ${incomingDir}/dist.tar.gz -C ${releaseDir} && rm -f ${incomingDir}/dist.tar.gz`
+      'распаковка релиза',
+      `mkdir -p ${releaseDir} && tar -xzf ${incomingDir}/dist.tar.gz -C ${releaseDir} && rm -f ${incomingDir}/dist.tar.gz`,
     );
     if (extractCode !== 0) return extractCode;
 
@@ -844,7 +875,7 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     const prev = await remoteExec(
       sshOpts,
       host,
-      `test -L "${currentLink}" && readlink -f "${currentLink}" 2>/dev/null || true`
+      `test -L "${currentLink}" && readlink -f "${currentLink}" 2>/dev/null || true`,
     );
     const prevTarget = prev.stdout.trim();
 
@@ -852,8 +883,8 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     const switchCode = await runStep(
       sshOpts,
       host,
-      "переключение current",
-      `ln -sfn ${releaseDir} ${projectDir}/current_tmp && mv -fT ${projectDir}/current_tmp ${currentLink}`
+      'переключение current',
+      `ln -sfn ${releaseDir} ${projectDir}/current_tmp && mv -fT ${projectDir}/current_tmp ${currentLink}`,
     );
     if (switchCode !== 0) return switchCode;
 
@@ -862,21 +893,26 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     const writeCode = await runStep(
       sshOpts,
       host,
-      "запись user-юнита",
-      `mkdir -p ${unitDir} && cat > ${unitDir}/${service} <<'PIZDEPLOY_UNIT'\n${unit}PIZDEPLOY_UNIT`
+      'запись user-юнита',
+      `mkdir -p ${unitDir} && cat > ${unitDir}/${service} <<'PIZDEPLOY_UNIT'\n${unit}PIZDEPLOY_UNIT`,
     );
     if (writeCode !== 0) return writeCode;
 
     // 11. Перечитываем конфигурацию пользовательского менеджера
-    const reloadCode = await runStep(sshOpts, host, "daemon-reload", "systemctl --user daemon-reload");
+    const reloadCode = await runStep(
+      sshOpts,
+      host,
+      'daemon-reload',
+      'systemctl --user daemon-reload',
+    );
     if (reloadCode !== 0) return reloadCode;
 
     // 12. Включаем автозапуск и перезапускаем/стартуем службу
     const enableCode = await runStep(
       sshOpts,
       host,
-      "включение службы",
-      `systemctl --user enable --now ${service} && systemctl --user restart ${service}`
+      'включение службы',
+      `systemctl --user enable --now ${service} && systemctl --user restart ${service}`,
     );
     if (enableCode !== 0) return enableCode;
 
@@ -888,18 +924,18 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
         await runStep(
           sshOpts,
           host,
-          "откат current",
-          `ln -sfn ${prevTarget} ${projectDir}/current_tmp && mv -fT ${projectDir}/current_tmp ${currentLink}`
+          'откат current',
+          `ln -sfn ${prevTarget} ${projectDir}/current_tmp && mv -fT ${projectDir}/current_tmp ${currentLink}`,
         );
-        console.error(`pizdeploy: current возвращён на ${prevTarget.split("/").pop()}`);
+        console.error(`pizdeploy: current возвращён на ${prevTarget.split('/').pop()}`);
       } else {
         await runStep(
           sshOpts,
           host,
-          "удаление current при первом деплое",
-          `rm -f ${currentLink} ${projectDir}/current_tmp`
+          'удаление current при первом деплое',
+          `rm -f ${currentLink} ${projectDir}/current_tmp`,
         );
-        console.error("pizdeploy: предыдущего релиза нет — симлинк current удалён");
+        console.error('pizdeploy: предыдущего релиза нет — симлинк current удалён');
       }
       return 1;
     }
@@ -908,10 +944,10 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     await remoteExec(
       sshOpts,
       host,
-      `cd ${releasesDir} && ls -1d * 2>/dev/null | sort | head -n -3 | xargs rm -rf 2>/dev/null || true`
+      `cd ${releasesDir} && ls -1d * 2>/dev/null | sort | head -n -3 | xargs rm -rf 2>/dev/null || true`,
     );
 
-    const hostname = host.replace(/^.*@/, "");
+    const hostname = host.replace(/^.*@/, '');
     console.log(`🎉 Успешно развернут релиз: ${relId}`);
     if (port) {
       console.log(`   URL: http://${hostname}:${port}`);

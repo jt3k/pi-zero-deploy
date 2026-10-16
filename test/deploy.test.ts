@@ -1,14 +1,30 @@
-import { afterAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { afterAll, describe, expect, test } from 'bun:test';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { renderUnit, resolveExecStart, resolvePort, sshOptions, scpOptions, userFromHost, detectAutobuildEntry } from "../src/index";
+import {
+  renderUnit,
+  resolveExecStart,
+  resolvePort,
+  sshOptions,
+  scpOptions,
+  userFromHost,
+  detectAutobuildEntry,
+} from '../src/index';
 
-const repoRoot = join(import.meta.dir, "..");
-const entrypoint = join(repoRoot, "src", "index.ts");
+const repoRoot = join(import.meta.dir, '..');
+const entrypoint = join(repoRoot, 'src', 'index.ts');
 const bunExe = process.execPath;
-const bunDir = join(bunExe, "..");
+const bunDir = join(bunExe, '..');
 
 const sandboxes: string[] = [];
 
@@ -55,40 +71,47 @@ exit 0
 `;
 
 function makeDeploySandbox(options: { packageJson?: unknown } = {}) {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), "pizdeploy-deploy-")));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'pizdeploy-deploy-')));
   sandboxes.push(base);
 
-  const binDir = join(base, "fake-bin");
+  const binDir = join(base, 'fake-bin');
   mkdirSync(binDir, { recursive: true });
 
-  const handler = join(base, "remote.sh");
+  const handler = join(base, 'remote.sh');
   writeFileSync(handler, REMOTE_HANDLER);
   chmodSync(handler, 0o755);
 
   // Заглушка ssh: пишет команду в лог (одной строкой, чтобы многострочные
   // команды вроде heredoc не разбивались на несколько «вызовов») и отдаёт её
   // удалённому «хосту».
-  const sshStub = join(binDir, "ssh");
+  const sshStub = join(binDir, 'ssh');
   writeFileSync(
     sshStub,
     '#!/bin/sh\nif [ "$1" = "-O" ]; then exit 0; fi\nfor a in "$@"; do last="$a"; done\n' +
-      'printf \'%s\\n\' "$last" | tr \'\\n\' \' \' >> "$SSH_LOG"; printf \'\\n\' >> "$SSH_LOG"\n' +
-      'SANDBOX="' + base + '" sh "' + handler + '" "$last"\n'
+      "printf '%s\\n' \"$last\" | tr '\\n' ' ' >> \"$SSH_LOG\"; printf '\\n' >> \"$SSH_LOG\"\n" +
+      'SANDBOX="' +
+      base +
+      '" sh "' +
+      handler +
+      '" "$last"\n',
   );
   chmodSync(sshStub, 0o755);
 
-  const scpStub = join(binDir, "scp");
-  writeFileSync(scpStub, '#!/bin/sh\nfor a in "$@"; do printf \'%s\\n\' "$a"; done >> "$SCP_LOG"\nexit "${SCP_EXIT:-0}"\n');
+  const scpStub = join(binDir, 'scp');
+  writeFileSync(
+    scpStub,
+    '#!/bin/sh\nfor a in "$@"; do printf \'%s\\n\' "$a"; done >> "$SCP_LOG"\nexit "${SCP_EXIT:-0}"\n',
+  );
   chmodSync(scpStub, 0o755);
 
   const pkg = options.packageJson ?? {
-    name: "myapp",
+    name: 'myapp',
     scripts: {
       build: "sh -c 'mkdir -p dist && echo built > dist/index.js'",
-      start: "node dist/index.js",
+      start: 'node dist/index.js',
     },
   };
-  writeFileSync(join(base, "package.json"), JSON.stringify(pkg, null, 2));
+  writeFileSync(join(base, 'package.json'), JSON.stringify(pkg, null, 2));
 
   return { base, cwd: base, pathValue: `${binDir}:${bunDir}:/usr/bin:/bin` };
 }
@@ -100,10 +123,10 @@ function deploy(opts: {
   env?: Record<string, string>;
   args?: string[];
 }) {
-  const sshLog = join(opts.base, "ssh.log");
-  const scpLog = join(opts.base, "scp.log");
-  writeFileSync(sshLog, "");
-  writeFileSync(scpLog, "");
+  const sshLog = join(opts.base, 'ssh.log');
+  const scpLog = join(opts.base, 'scp.log');
+  writeFileSync(sshLog, '');
+  writeFileSync(scpLog, '');
 
   const proc = Bun.spawnSync([bunExe, entrypoint, ...(opts.args ?? [])], {
     cwd: opts.cwd,
@@ -112,21 +135,21 @@ function deploy(opts: {
       SANDBOX: opts.base,
       SSH_LOG: sshLog,
       SCP_LOG: scpLog,
-      PIZDEPLOY_VERIFY_TIMEOUT_MS: "400",
-      PIZDEPLOY_VERIFY_INTERVAL_MS: "50",
-      PIZDEPLOY_STABLE_HOLD_MS: "50",
+      PIZDEPLOY_VERIFY_TIMEOUT_MS: '400',
+      PIZDEPLOY_VERIFY_INTERVAL_MS: '50',
+      PIZDEPLOY_STABLE_HOLD_MS: '50',
       ...opts.env,
     },
-    stdout: "pipe",
-    stderr: "pipe",
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
 
   return {
     code: proc.exitCode,
     stdout: proc.stdout.toString(),
     stderr: proc.stderr.toString(),
-    calls: readFileSync(sshLog, "utf8").split("\n").filter(Boolean),
-    scp: readFileSync(scpLog, "utf8").split("\n").filter(Boolean),
+    calls: readFileSync(sshLog, 'utf8').split('\n').filter(Boolean),
+    scp: readFileSync(scpLog, 'utf8').split('\n').filter(Boolean),
   };
 }
 
@@ -136,513 +159,535 @@ afterAll(() => {
   }
 });
 
-describe("вспомогательные функции", () => {
-  test("sshOptions/scpOptions переиспользуют одно соединение и не требуют пароля", () => {
-    const ssh = sshOptions("pi@zero.local", "/tmp/s.sock");
-    expect(ssh).toContain("BatchMode=yes");
-    expect(ssh).toContain("ControlMaster=auto");
-    expect(ssh).toContain("ControlPath=/tmp/s.sock");
-    expect(ssh).toContain("-o");
+describe('вспомогательные функции', () => {
+  test('sshOptions/scpOptions переиспользуют одно соединение и не требуют пароля', () => {
+    const ssh = sshOptions('pi@zero.local', '/tmp/s.sock');
+    expect(ssh).toContain('BatchMode=yes');
+    expect(ssh).toContain('ControlMaster=auto');
+    expect(ssh).toContain('ControlPath=/tmp/s.sock');
+    expect(ssh).toContain('-o');
 
-    const scp = scpOptions("pi@zero.local", "/tmp/s.sock");
-    expect(scp).toContain("ControlPath=/tmp/s.sock");
-    expect(scp).not.toContain("ControlMaster=auto");
+    const scp = scpOptions('pi@zero.local', '/tmp/s.sock');
+    expect(scp).toContain('ControlPath=/tmp/s.sock');
+    expect(scp).not.toContain('ControlMaster=auto');
   });
 
-  test("для IPv6-адреса без порта AddressFamily не добавляется", () => {
-    expect(sshOptions("pi@fe80::1", "/tmp/s.sock")).not.toContain("AddressFamily=inet");
-    expect(sshOptions("pi@zero.local", "/tmp/s.sock")).toContain("AddressFamily=inet");
+  test('для IPv6-адреса без порта AddressFamily не добавляется', () => {
+    expect(sshOptions('pi@fe80::1', '/tmp/s.sock')).not.toContain('AddressFamily=inet');
+    expect(sshOptions('pi@zero.local', '/tmp/s.sock')).toContain('AddressFamily=inet');
   });
 
-  test("userFromHost извлекает имя пользователя из адреса", () => {
-    expect(userFromHost("pi@zero.local")).toBe("pi");
-    expect(userFromHost("deploy@10.0.0.5")).toBe("deploy");
-    expect(userFromHost("zero.local")).toBeUndefined();
+  test('userFromHost извлекает имя пользователя из адреса', () => {
+    expect(userFromHost('pi@zero.local')).toBe('pi');
+    expect(userFromHost('deploy@10.0.0.5')).toBe('deploy');
+    expect(userFromHost('zero.local')).toBeUndefined();
   });
 
-  test("pizdeploy.port читается, при отсутствии остаётся undefined", () => {
+  test('pizdeploy.port читается, при отсутствии остаётся undefined', () => {
     expect(resolvePort({ pizdeploy: { port: 1234 } })).toBe(1234);
-    expect(resolvePort({ pizdeploy: { port: "3000" } })).toBe(3000);
+    expect(resolvePort({ pizdeploy: { port: '3000' } })).toBe(3000);
     expect(resolvePort({ pizdeploy: {} })).toBeUndefined();
     expect(resolvePort({})).toBeUndefined();
     expect(resolvePort(undefined)).toBeUndefined();
-    expect(resolvePort({ pizdeploy: { port: "abc" } })).toBeUndefined();
+    expect(resolvePort({ pizdeploy: { port: 'abc' } })).toBeUndefined();
   });
 
-  test("resolveExecStart адаптирует команду и отсекает dist/", () => {
-    expect(resolveExecStart({ scripts: { start: "node dist/index.js" } })).toBe("/usr/bin/node index.js");
-    expect(resolveExecStart({ scripts: { start: "node server.js" } })).toBe("/usr/bin/node server.js");
-    expect(resolveExecStart({ scripts: { start: "/usr/bin/node dist/server.js" } })).toBe("/usr/bin/node server.js");
-    expect(resolveExecStart({ scripts: { start: "dist/app" } })).toBe("app");
-    expect(resolveExecStart({ scripts: { start: "   " } })).toBeUndefined();
+  test('resolveExecStart адаптирует команду и отсекает dist/', () => {
+    expect(resolveExecStart({ scripts: { start: 'node dist/index.js' } })).toBe(
+      '/usr/bin/node index.js',
+    );
+    expect(resolveExecStart({ scripts: { start: 'node server.js' } })).toBe(
+      '/usr/bin/node server.js',
+    );
+    expect(resolveExecStart({ scripts: { start: '/usr/bin/node dist/server.js' } })).toBe(
+      '/usr/bin/node server.js',
+    );
+    expect(resolveExecStart({ scripts: { start: 'dist/app' } })).toBe('app');
+    expect(resolveExecStart({ scripts: { start: '   ' } })).toBeUndefined();
     expect(resolveExecStart({ scripts: {} })).toBeUndefined();
     expect(resolveExecStart({})).toBeUndefined();
     expect(resolveExecStart(undefined)).toBeUndefined();
   });
 
-  test("detectAutobuildEntry корректно разбирает команды и пути", () => {
-    expect(detectAutobuildEntry("node app.js")).toEqual({
-      entryPath: "app.js",
-      outputFileName: "app.mjs",
-      execStart: "/usr/bin/node app.mjs",
+  test('detectAutobuildEntry корректно разбирает команды и пути', () => {
+    expect(detectAutobuildEntry('node app.js')).toEqual({
+      entryPath: 'app.js',
+      outputFileName: 'app.mjs',
+      execStart: '/usr/bin/node app.mjs',
     });
-    expect(detectAutobuildEntry("node ./src/server.js")).toEqual({
-      entryPath: "./src/server.js",
-      outputFileName: "server.mjs",
-      execStart: "/usr/bin/node server.mjs",
+    expect(detectAutobuildEntry('node ./src/server.js')).toEqual({
+      entryPath: './src/server.js',
+      outputFileName: 'server.mjs',
+      execStart: '/usr/bin/node server.mjs',
     });
-    expect(detectAutobuildEntry("node --inspect --expose-gc src/index.ts")).toEqual({
-      entryPath: "src/index.ts",
-      outputFileName: "index.mjs",
-      execStart: "/usr/bin/node --inspect --expose-gc index.mjs",
+    expect(detectAutobuildEntry('node --inspect --expose-gc src/index.ts')).toEqual({
+      entryPath: 'src/index.ts',
+      outputFileName: 'index.mjs',
+      execStart: '/usr/bin/node --inspect --expose-gc index.mjs',
     });
-    expect(detectAutobuildEntry("node app.js --port 8080")).toEqual({
-      entryPath: "app.js",
-      outputFileName: "app.mjs",
-      execStart: "/usr/bin/node app.mjs --port 8080",
+    expect(detectAutobuildEntry('node app.js --port 8080')).toEqual({
+      entryPath: 'app.js',
+      outputFileName: 'app.mjs',
+      execStart: '/usr/bin/node app.mjs --port 8080',
     });
-    expect(detectAutobuildEntry("")).toBeNull();
-    expect(detectAutobuildEntry("some-binary arg")).toBeNull();
+    expect(detectAutobuildEntry('')).toBeNull();
+    expect(detectAutobuildEntry('some-binary arg')).toBeNull();
   });
 
-  test("деплой проекта без scripts.start прерывается с ошибкой до передачи файлов", () => {
+  test('деплой проекта без scripts.start прерывается с ошибкой до передачи файлов', () => {
     const sb = makeDeploySandbox({
       packageJson: {
-        name: "myapp",
+        name: 'myapp',
         scripts: { build: "sh -c 'mkdir -p dist && echo built > dist/index.js'" },
       },
     });
     const res = deploy({ ...sb });
 
     expect(res.code).toBe(1);
-    expect(res.stderr).toContain("scripts.start");
+    expect(res.stderr).toContain('scripts.start');
     expect(res.calls.length).toBe(0);
   });
 
-  test("деплой проекта без scripts.build автоматически собирает проект в .mjs", () => {
+  test('деплой проекта без scripts.build автоматически собирает проект в .mjs', () => {
     const sb = makeDeploySandbox({
       packageJson: {
-        name: "micro-app",
-        scripts: { start: "node app.js" },
+        name: 'micro-app',
+        scripts: { start: 'node app.js' },
       },
     });
-    writeFileSync(join(sb.base, "app.js"), "console.log('hello');\n");
+    writeFileSync(join(sb.base, 'app.js'), "console.log('hello');\n");
 
-    const res = deploy({ ...sb, env: { LINGER: "yes" } });
+    const res = deploy({ ...sb, env: { LINGER: 'yes' } });
 
     expect(res.code).toBe(0);
-    expect(res.stdout).toContain("🔨 Автоматическая сборка:");
-    expect(res.stdout).toContain("🎉 Успешно развернут релиз:");
-    const unitCall = res.calls.find((c) => c.includes("cat > ~/.config/systemd/user/micro-app.service"));
+    expect(res.stdout).toContain('🔨 Автоматическая сборка:');
+    expect(res.stdout).toContain('🎉 Успешно развернут релиз:');
+    const unitCall = res.calls.find((c) =>
+      c.includes('cat > ~/.config/systemd/user/micro-app.service'),
+    );
     expect(unitCall).toBeDefined();
-    expect(unitCall).toContain("ExecStart=/usr/bin/node app.mjs");
+    expect(unitCall).toContain('ExecStart=/usr/bin/node app.mjs');
   });
 
-  test("деплой проекта без scripts.build с нераспознанным start выводит подсказку", () => {
+  test('деплой проекта без scripts.build с нераспознанным start выводит подсказку', () => {
     const sb = makeDeploySandbox({
       packageJson: {
-        name: "unknown-app",
-        scripts: { start: "unknown-runner" },
+        name: 'unknown-app',
+        scripts: { start: 'unknown-runner' },
       },
     });
 
     const res = deploy({ ...sb });
 
     expect(res.code).toBe(1);
-    expect(res.stderr).toContain("не удалось определить входной файл");
-    expect(res.stderr).toContain("Рекомендация");
+    expect(res.stderr).toContain('не удалось определить входной файл');
+    expect(res.stderr).toContain('Рекомендация');
     expect(res.calls.length).toBe(0);
   });
 });
 
-describe("генерация unit-файла", () => {
-  test("дефолтный шаблон формирует unit с WorkingDirectory, ExecStart и NODE_ENV=production", () => {
-    const unit = renderUnit("my-app", "/usr/bin/node index.js");
-    expect(unit).toContain("Description=my-app");
-    expect(unit).toContain("After=default.target");
-    expect(unit).toContain("WorkingDirectory=/home/pi/projects/my-app/current");
-    expect(unit).toContain("ExecStart=/usr/bin/node index.js");
+describe('генерация unit-файла', () => {
+  test('дефолтный шаблон формирует unit с WorkingDirectory, ExecStart и NODE_ENV=production', () => {
+    const unit = renderUnit('my-app', '/usr/bin/node index.js');
+    expect(unit).toContain('Description=my-app');
+    expect(unit).toContain('After=default.target');
+    expect(unit).toContain('WorkingDirectory=/home/pi/projects/my-app/current');
+    expect(unit).toContain('ExecStart=/usr/bin/node index.js');
     expect(unit).toContain('Environment="NODE_ENV=production"');
-    expect(unit).not.toContain("PORT=");
-    expect(unit).toContain("WantedBy=default.target");
+    expect(unit).not.toContain('PORT=');
+    expect(unit).toContain('WantedBy=default.target');
   });
 
-  test("дефолтный шаблон с заданным портом содержит Environment=PORT", () => {
-    const unit = renderUnit("my-app", "/usr/bin/node index.js", 1234);
-    expect(unit).toContain("WorkingDirectory=/home/pi/projects/my-app/current");
-    expect(unit).toContain("ExecStart=/usr/bin/node index.js");
+  test('дефолтный шаблон с заданным портом содержит Environment=PORT', () => {
+    const unit = renderUnit('my-app', '/usr/bin/node index.js', 1234);
+    expect(unit).toContain('WorkingDirectory=/home/pi/projects/my-app/current');
+    expect(unit).toContain('ExecStart=/usr/bin/node index.js');
     expect(unit).toContain('Environment="PORT=1234"');
     expect(unit).toContain('Environment="NODE_ENV=production"');
   });
 
-  test("пользовательский template из проекта сохраняет переменные окружения и подставляет WorkingDirectory + ExecStart", () => {
+  test('пользовательский template из проекта сохраняет переменные окружения и подставляет WorkingDirectory + ExecStart', () => {
     const tmpTemplate = join(tmpdir(), `custom-unit-${Date.now()}.service`);
     writeFileSync(
       tmpTemplate,
       [
-        "[Unit]",
-        "Description=My Custom Telegram Bot",
-        "After=default.target",
-        "",
-        "[Service]",
-        "Type=simple",
+        '[Unit]',
+        'Description=My Custom Telegram Bot',
+        'After=default.target',
+        '',
+        '[Service]',
+        'Type=simple',
         'Environment="NODE_ENV=production"',
         'Environment="BOT_TOKEN=123456:ABC-DEF"',
-        "",
-        "[Install]",
-        "WantedBy=default.target",
-      ].join("\n")
+        '',
+        '[Install]',
+        'WantedBy=default.target',
+      ].join('\n'),
     );
 
     try {
-      const unit = renderUnit("tg-bot", "/usr/bin/node bot.js", undefined, tmpTemplate);
-      expect(unit).toContain("Description=My Custom Telegram Bot");
-      expect(unit).toContain("WorkingDirectory=/home/pi/projects/tg-bot/current");
-      expect(unit).toContain("ExecStart=/usr/bin/node bot.js");
-      expect(unit).toContain("Restart=always");
-      expect(unit).toContain("RestartSec=2");
+      const unit = renderUnit('tg-bot', '/usr/bin/node bot.js', undefined, tmpTemplate);
+      expect(unit).toContain('Description=My Custom Telegram Bot');
+      expect(unit).toContain('WorkingDirectory=/home/pi/projects/tg-bot/current');
+      expect(unit).toContain('ExecStart=/usr/bin/node bot.js');
+      expect(unit).toContain('Restart=always');
+      expect(unit).toContain('RestartSec=2');
       expect(unit).toContain('Environment="BOT_TOKEN=123456:ABC-DEF"');
       expect(unit).toContain('Environment="NODE_ENV=production"');
-      expect(unit).not.toContain("PORT=");
-      expect(unit).toContain("WantedBy=default.target");
+      expect(unit).not.toContain('PORT=');
+      expect(unit).toContain('WantedBy=default.target');
     } finally {
       rmSync(tmpTemplate, { force: true });
     }
   });
 
-  test("пользовательский шаблон с явными Restart и RestartSec сохраняет пользовательские значения", () => {
+  test('пользовательский шаблон с явными Restart и RestartSec сохраняет пользовательские значения', () => {
     const tmpTemplate = join(tmpdir(), `custom-restart-${Date.now()}.service`);
     writeFileSync(
       tmpTemplate,
       [
-        "[Unit]",
-        "Description=Explicit Restart Bot",
-        "",
-        "[Service]",
-        "Type=simple",
-        "Restart=on-failure",
-        "RestartSec=5",
+        '[Unit]',
+        'Description=Explicit Restart Bot',
+        '',
+        '[Service]',
+        'Type=simple',
+        'Restart=on-failure',
+        'RestartSec=5',
         'Environment="NODE_ENV=production"',
-      ].join("\n")
+      ].join('\n'),
     );
 
     try {
-      const unit = renderUnit("custom-bot", "/usr/bin/node bot.js", undefined, tmpTemplate);
-      expect(unit).toContain("Restart=on-failure");
-      expect(unit).toContain("RestartSec=5");
-      expect(unit).not.toContain("Restart=always");
-      expect(unit).not.toContain("RestartSec=2");
+      const unit = renderUnit('custom-bot', '/usr/bin/node bot.js', undefined, tmpTemplate);
+      expect(unit).toContain('Restart=on-failure');
+      expect(unit).toContain('RestartSec=5');
+      expect(unit).not.toContain('Restart=always');
+      expect(unit).not.toContain('RestartSec=2');
     } finally {
       rmSync(tmpTemplate, { force: true });
     }
   });
 
-  test("пользовательский шаблон с устаревшими WorkingDirectory и ExecStart перезаписывает их актуальными значениями", () => {
+  test('пользовательский шаблон с устаревшими WorkingDirectory и ExecStart перезаписывает их актуальными значениями', () => {
     const tmpTemplate = join(tmpdir(), `override-unit-${Date.now()}.service`);
     writeFileSync(
       tmpTemplate,
       [
-        "[Unit]",
-        "Description=Legacy Service",
-        "",
-        "[Service]",
-        "WorkingDirectory=/old/path",
-        "ExecStart=/old/bin/start.sh",
+        '[Unit]',
+        'Description=Legacy Service',
+        '',
+        '[Service]',
+        'WorkingDirectory=/old/path',
+        'ExecStart=/old/bin/start.sh',
         'Environment="KEY=value"',
-      ].join("\n")
+      ].join('\n'),
     );
 
     try {
-      const unit = renderUnit("new-service", "/usr/bin/node server.js", undefined, tmpTemplate);
-      expect(unit).toContain("WorkingDirectory=/home/pi/projects/new-service/current");
-      expect(unit).toContain("ExecStart=/usr/bin/node server.js");
-      expect(unit).toContain("Restart=always");
-      expect(unit).toContain("RestartSec=2");
-      expect(unit).not.toContain("/old/path");
-      expect(unit).not.toContain("/old/bin/start.sh");
+      const unit = renderUnit('new-service', '/usr/bin/node server.js', undefined, tmpTemplate);
+      expect(unit).toContain('WorkingDirectory=/home/pi/projects/new-service/current');
+      expect(unit).toContain('ExecStart=/usr/bin/node server.js');
+      expect(unit).toContain('Restart=always');
+      expect(unit).toContain('RestartSec=2');
+      expect(unit).not.toContain('/old/path');
+      expect(unit).not.toContain('/old/bin/start.sh');
       expect(unit).toContain('Environment="KEY=value"');
-      expect(unit).toContain("WantedBy=default.target");
+      expect(unit).toContain('WantedBy=default.target');
     } finally {
       rmSync(tmpTemplate, { force: true });
     }
   });
 });
 
-describe("отказ от sudo", () => {
-  test("ни одна удалённая команда не содержит sudo и не пишет в /etc/systemd/system", () => {
+describe('отказ от sudo', () => {
+  test('ни одна удалённая команда не содержит sudo и не пишет в /etc/systemd/system', () => {
     const sb = makeDeploySandbox();
-    const res = deploy({ ...sb, env: { LINGER: "yes" } });
+    const res = deploy({ ...sb, env: { LINGER: 'yes' } });
 
     expect(res.code).toBe(0);
     expect(res.calls.length).toBeGreaterThan(0);
     for (const call of res.calls) {
-      expect(call).not.toContain("sudo");
-      expect(call).not.toContain("/etc/systemd/system");
+      expect(call).not.toContain('sudo');
+      expect(call).not.toContain('/etc/systemd/system');
     }
-    expect(res.calls.some((c) => c.includes("systemctl --user enable --now myapp.service"))).toBe(true);
-    expect(res.calls.some((c) => c.includes("systemctl --user daemon-reload"))).toBe(true);
+    expect(res.calls.some((c) => c.includes('systemctl --user enable --now myapp.service'))).toBe(
+      true,
+    );
+    expect(res.calls.some((c) => c.includes('systemctl --user daemon-reload'))).toBe(true);
   });
 
-  test("юнит пишется в ~/.config/systemd/user с сгенерированным содержимым", () => {
+  test('юнит пишется в ~/.config/systemd/user с сгенерированным содержимым', () => {
     const sb = makeDeploySandbox({
       packageJson: {
-        name: "myapp",
+        name: 'myapp',
         pizdeploy: { port: 1234 },
         scripts: {
           build: "sh -c 'mkdir -p dist && echo built > dist/index.js'",
-          start: "node dist/index.js",
+          start: 'node dist/index.js',
         },
       },
     });
-    const res = deploy({ ...sb, env: { LINGER: "yes" } });
+    const res = deploy({ ...sb, env: { LINGER: 'yes' } });
 
     expect(res.code).toBe(0);
-    const unitCall = res.calls.find((c) => c.includes("cat > ~/.config/systemd/user/myapp.service"));
+    const unitCall = res.calls.find((c) =>
+      c.includes('cat > ~/.config/systemd/user/myapp.service'),
+    );
     expect(unitCall).toBeDefined();
-    expect(unitCall).toContain("ExecStart=/usr/bin/node index.js");
+    expect(unitCall).toContain('ExecStart=/usr/bin/node index.js');
     expect(unitCall).toContain('Environment="PORT=1234"');
-    expect(unitCall).toContain("WantedBy=default.target");
+    expect(unitCall).toContain('WantedBy=default.target');
   });
 
-  test("каталог systemd/ проекта игнорируется и не передаётся на хост", () => {
+  test('каталог systemd/ проекта игнорируется и не передаётся на хост', () => {
     const sb = makeDeploySandbox();
-    mkdirSync(join(sb.base, "systemd"), { recursive: true });
+    mkdirSync(join(sb.base, 'systemd'), { recursive: true });
     writeFileSync(
-      join(sb.base, "systemd", "myapp.service"),
-      "[Service]\nExecStart=/usr/bin/node /somewhere/legacy.js\n"
+      join(sb.base, 'systemd', 'myapp.service'),
+      '[Service]\nExecStart=/usr/bin/node /somewhere/legacy.js\n',
     );
 
-    const res = deploy({ ...sb, env: { LINGER: "yes" } });
+    const res = deploy({ ...sb, env: { LINGER: 'yes' } });
 
     expect(res.code).toBe(0);
-    expect(res.scp.join("\n")).not.toContain(".service");
-    expect(res.scp.join("\n")).toContain("dist.tar.gz");
-    const unitCall = res.calls.find((c) => c.includes("cat > ~/.config/systemd/user/myapp.service"));
-    expect(unitCall).toContain("ExecStart=/usr/bin/node index.js");
-    expect(unitCall).not.toContain("legacy.js");
+    expect(res.scp.join('\n')).not.toContain('.service');
+    expect(res.scp.join('\n')).toContain('dist.tar.gz');
+    const unitCall = res.calls.find((c) =>
+      c.includes('cat > ~/.config/systemd/user/myapp.service'),
+    );
+    expect(unitCall).toContain('ExecStart=/usr/bin/node index.js');
+    expect(unitCall).not.toContain('legacy.js');
   });
 });
 
-describe("linger", () => {
-  test("при выключенном linger включается ровно один раз за деплой", () => {
+describe('linger', () => {
+  test('при выключенном linger включается ровно один раз за деплой', () => {
     const sb = makeDeploySandbox();
-    const res = deploy({ ...sb, env: { LINGER: "no" } });
+    const res = deploy({ ...sb, env: { LINGER: 'no' } });
 
     expect(res.code).toBe(0);
-    expect(res.calls.filter((c) => c.includes("loginctl enable-linger pi")).length).toBe(1);
-    expect(res.calls.filter((c) => c.includes("loginctl show-user pi")).length).toBe(2);
-    expect(res.stdout).toContain("Автозапуск пользовательской сессии pi включён");
+    expect(res.calls.filter((c) => c.includes('loginctl enable-linger pi')).length).toBe(1);
+    expect(res.calls.filter((c) => c.includes('loginctl show-user pi')).length).toBe(2);
+    expect(res.stdout).toContain('Автозапуск пользовательской сессии pi включён');
   });
 
-  test("при уже включённом linger состояние не меняется", () => {
+  test('при уже включённом linger состояние не меняется', () => {
     const sb = makeDeploySandbox();
-    const res = deploy({ ...sb, env: { LINGER: "yes" } });
+    const res = deploy({ ...sb, env: { LINGER: 'yes' } });
 
     expect(res.code).toBe(0);
-    expect(res.calls.filter((c) => c.includes("loginctl enable-linger")).length).toBe(0);
-    expect(res.calls.filter((c) => c.includes("loginctl show-user pi")).length).toBe(1);
+    expect(res.calls.filter((c) => c.includes('loginctl enable-linger')).length).toBe(0);
+    expect(res.calls.filter((c) => c.includes('loginctl show-user pi')).length).toBe(1);
   });
 
-  test("не удалось включить linger — деплой прерывается до распаковки", () => {
+  test('не удалось включить linger — деплой прерывается до распаковки', () => {
     const sb = makeDeploySandbox();
-    const res = deploy({ ...sb, env: { LINGER: "no", LINGER_AFTER: "no" } });
+    const res = deploy({ ...sb, env: { LINGER: 'no', LINGER_AFTER: 'no' } });
 
     expect(res.code).not.toBe(0);
-    expect(res.stdout).not.toContain("🎉");
-    expect(res.stderr).toContain("автозапуск сессии pi остался выключенным");
-    expect(res.calls.some((c) => c.includes("tar -xzf"))).toBe(false);
+    expect(res.stdout).not.toContain('🎉');
+    expect(res.stderr).toContain('автозапуск сессии pi остался выключенным');
+    expect(res.calls.some((c) => c.includes('tar -xzf'))).toBe(false);
   });
 });
 
-describe("проверка кода возврата каждого шага", () => {
-  test("отказ распаковки: ненулевой код, пустой stdout, current не переключается", () => {
+describe('проверка кода возврата каждого шага', () => {
+  test('отказ распаковки: ненулевой код, пустой stdout, current не переключается', () => {
     const sb = makeDeploySandbox();
-    const res = deploy({ ...sb, env: { LINGER: "yes", FAIL_ON: "tar -xzf" } });
+    const res = deploy({ ...sb, env: { LINGER: 'yes', FAIL_ON: 'tar -xzf' } });
 
     expect(res.code).not.toBe(0);
-    expect(res.stdout).toBe("");
-    expect(res.stderr).toContain("распаковка релиза");
-    expect(res.calls.some((c) => c.includes("mv -fT"))).toBe(false);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).toContain('распаковка релиза');
+    expect(res.calls.some((c) => c.includes('mv -fT'))).toBe(false);
   });
 
-  test("отказ установки юнита: сообщение об успехе отсутствует", () => {
+  test('отказ установки юнита: сообщение об успехе отсутствует', () => {
     const sb = makeDeploySandbox();
-    const res = deploy({ ...sb, env: { LINGER: "yes", FAIL_ON: "enable --now" } });
+    const res = deploy({ ...sb, env: { LINGER: 'yes', FAIL_ON: 'enable --now' } });
 
     expect(res.code).not.toBe(0);
-    expect(res.stdout).not.toContain("🎉");
-    expect(res.stderr).toContain("включение службы");
+    expect(res.stdout).not.toContain('🎉');
+    expect(res.stderr).toContain('включение службы');
   });
 
-  test("отказ scp: ненулевой код без удалённых шагов", () => {
+  test('отказ scp: ненулевой код без удалённых шагов', () => {
     const sb = makeDeploySandbox();
-    const res = deploy({ ...sb, env: { LINGER: "yes", SCP_EXIT: "1" } });
+    const res = deploy({ ...sb, env: { LINGER: 'yes', SCP_EXIT: '1' } });
 
     expect(res.code).toBe(1);
-    expect(res.stdout).toBe("");
-    expect(res.calls.some((c) => c.includes("tar -xzf"))).toBe(false);
+    expect(res.stdout).toBe('');
+    expect(res.calls.some((c) => c.includes('tar -xzf'))).toBe(false);
   });
 
-  test("сбой ротации не отменяет успешный деплой", () => {
+  test('сбой ротации не отменяет успешный деплой', () => {
     const sb = makeDeploySandbox();
-    const res = deploy({ ...sb, env: { LINGER: "yes", FAIL_ON: "head -n -3" } });
+    const res = deploy({ ...sb, env: { LINGER: 'yes', FAIL_ON: 'head -n -3' } });
 
     expect(res.code).toBe(0);
-    expect(res.stdout).toContain("🎉");
+    expect(res.stdout).toContain('🎉');
   });
 
-  test("при отказе верификации current возвращается на предыдущий релиз", () => {
-    const sb = makeDeploySandbox();
-    const res = deploy({
-      ...sb,
-      env: { LINGER: "yes", PREV_TARGET: "/home/pi/projects/myapp/releases/myapp_old11", ACTIVE_FROM: "999" },
-    });
-
-    expect(res.code).not.toBe(0);
-    expect(res.stdout).not.toContain("🎉");
-    expect(res.calls.some((c) => c.includes("ln -sfn /home/pi/projects/myapp/releases/myapp_old11"))).toBe(true);
-  });
-
-  test("при отказе верификации во время первого деплоя current удаляется без зацикливания", () => {
-    const sb = makeDeploySandbox();
-    const res = deploy({
-      ...sb,
-      env: { LINGER: "yes", ACTIVE_FROM: "999" },
-    });
-
-    expect(res.code).not.toBe(0);
-    expect(res.stdout).not.toContain("🎉");
-    expect(res.calls.some((c) => c.includes("rm -f /home/pi/projects/myapp/current"))).toBe(true);
-    expect(res.calls.some((c) => c.includes("ln -sfn /home/pi/projects/myapp/current"))).toBe(false);
-  });
-
-  test("каталог неудачного релиза остаётся на диске", () => {
-    const sb = makeDeploySandbox();
-    const res = deploy({ ...sb, env: { LINGER: "yes", ACTIVE_FROM: "999" } });
-
-    expect(res.code).not.toBe(0);
-    // Ротация (единственный шаг с `|| true`) при отказе не выполняется.
-    expect(res.calls.some((c) => c.includes("head -n -3"))).toBe(false);
-  });
-});
-
-describe("верификация работоспособности", () => {
-  test("служба становится active со второй попытки — код 0", () => {
-    const sb = makeDeploySandbox();
-    const res = deploy({ ...sb, env: { LINGER: "yes", ACTIVE_FROM: "2" } });
-
-    expect(res.code).toBe(0);
-    expect(res.calls.filter((c) => c.includes("is-active")).length).toBeGreaterThanOrEqual(2);
-  });
-
-  test("служба никогда не становится active — ненулевой код", () => {
-    const sb = makeDeploySandbox();
-    const res = deploy({ ...sb, env: { LINGER: "yes", ACTIVE_FROM: "999" } });
-
-    expect(res.code).not.toBe(0);
-    expect(res.stdout).not.toContain("🎉");
-    expect(res.stderr).toContain("не перешла в состояние active");
-  });
-
-  test("порт задан и слушается — код 0", () => {
-    const sb = makeDeploySandbox({
-      packageJson: {
-        name: "myapp",
-        pizdeploy: { port: 1234 },
-        scripts: {
-          build: "sh -c 'mkdir -p dist && echo built > dist/index.js'",
-          start: "node dist/index.js",
-        },
-      },
-    });
-    const res = deploy({ ...sb, env: { LINGER: "yes", PORT_LISTEN: "yes" } });
-
-    expect(res.code).toBe(0);
-    expect(res.calls.some((c) => c.includes("ss -tln") && c.includes("p=1234"))).toBe(true);
-  });
-
-  test("порт задан, но не слушается — ненулевой код с указанием порта", () => {
-    const sb = makeDeploySandbox({
-      packageJson: {
-        name: "myapp",
-        pizdeploy: { port: 1234 },
-        scripts: {
-          build: "sh -c 'mkdir -p dist && echo built > dist/index.js'",
-          start: "node dist/index.js",
-        },
-      },
-    });
-    const res = deploy({ ...sb, env: { LINGER: "yes", PORT_LISTEN: "no", LISTENING: "22 3000" } });
-
-    expect(res.code).not.toBe(0);
-    expect(res.stdout).not.toContain("🎉");
-    expect(res.stderr).toContain("порт 1234");
-    expect(res.stderr).toContain("3000");
-  });
-
-  test("порт не задан — проверка прослушивания пропускается", () => {
-    const sb = makeDeploySandbox();
-    const res = deploy({ ...sb, env: { LINGER: "yes" } });
-
-    expect(res.code).toBe(0);
-    expect(res.calls.filter((c) => c.includes("ss -tln")).length).toBe(0);
-  });
-
-  test("растущий NRestarts трактуется как неуспех", () => {
-    const sb = makeDeploySandbox();
-    const res = deploy({
-      ...sb,
-      env: { LINGER: "yes", NRESTARTS_BEFORE: "0", NRESTARTS_AFTER: "3" },
-    });
-
-    expect(res.code).not.toBe(0);
-    expect(res.stdout).not.toContain("🎉");
-    expect(res.stderr).toContain("перезапустилась");
-  });
-
-  test("успешный вывод содержит URL при наличии порта и не содержит строку службы", () => {
-    const sb = makeDeploySandbox({
-      packageJson: {
-        name: "myapp",
-        pizdeploy: { port: 1234 },
-        scripts: {
-          build: "sh -c 'mkdir -p dist && echo built > dist/index.js'",
-          start: "node dist/index.js",
-        },
-      },
-    });
-    const res = deploy({ ...sb, env: { LINGER: "yes" } });
-
-    expect(res.code).toBe(0);
-    expect(res.stdout).toContain("🎉 Успешно развернут релиз:");
-    expect(res.stdout).toContain("URL: http://zero.local:1234");
-    expect(res.stdout).not.toContain("Служба:");
-  });
-
-  test("без порта вывод не содержит строку службы и сообщение о пропуске проверки", () => {
-    const sb = makeDeploySandbox();
-    const res = deploy({ ...sb, env: { LINGER: "yes" } });
-
-    expect(res.code).toBe(0);
-    expect(res.stdout).toContain("🎉 Успешно развернут релиз:");
-    expect(res.stdout).not.toContain("Служба:");
-    expect(res.stdout).not.toContain("порт не задан");
-    expect(res.stdout).not.toContain("URL:");
-  });
-
-  test("переменные окружения PIZDEPLOY_VERIFY_INTERVAL_MS и PIZDEPLOY_STABLE_HOLD_MS ускоряют верификацию", () => {
+  test('при отказе верификации current возвращается на предыдущий релиз', () => {
     const sb = makeDeploySandbox();
     const res = deploy({
       ...sb,
       env: {
-        LINGER: "yes",
-        PIZDEPLOY_VERIFY_TIMEOUT_MS: "500",
-        PIZDEPLOY_VERIFY_INTERVAL_MS: "50",
-        PIZDEPLOY_STABLE_HOLD_MS: "50",
+        LINGER: 'yes',
+        PREV_TARGET: '/home/pi/projects/myapp/releases/myapp_old11',
+        ACTIVE_FROM: '999',
+      },
+    });
+
+    expect(res.code).not.toBe(0);
+    expect(res.stdout).not.toContain('🎉');
+    expect(
+      res.calls.some((c) => c.includes('ln -sfn /home/pi/projects/myapp/releases/myapp_old11')),
+    ).toBe(true);
+  });
+
+  test('при отказе верификации во время первого деплоя current удаляется без зацикливания', () => {
+    const sb = makeDeploySandbox();
+    const res = deploy({
+      ...sb,
+      env: { LINGER: 'yes', ACTIVE_FROM: '999' },
+    });
+
+    expect(res.code).not.toBe(0);
+    expect(res.stdout).not.toContain('🎉');
+    expect(res.calls.some((c) => c.includes('rm -f /home/pi/projects/myapp/current'))).toBe(true);
+    expect(res.calls.some((c) => c.includes('ln -sfn /home/pi/projects/myapp/current'))).toBe(
+      false,
+    );
+  });
+
+  test('каталог неудачного релиза остаётся на диске', () => {
+    const sb = makeDeploySandbox();
+    const res = deploy({ ...sb, env: { LINGER: 'yes', ACTIVE_FROM: '999' } });
+
+    expect(res.code).not.toBe(0);
+    // Ротация (единственный шаг с `|| true`) при отказе не выполняется.
+    expect(res.calls.some((c) => c.includes('head -n -3'))).toBe(false);
+  });
+});
+
+describe('верификация работоспособности', () => {
+  test('служба становится active со второй попытки — код 0', () => {
+    const sb = makeDeploySandbox();
+    const res = deploy({ ...sb, env: { LINGER: 'yes', ACTIVE_FROM: '2' } });
+
+    expect(res.code).toBe(0);
+    expect(res.calls.filter((c) => c.includes('is-active')).length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('служба никогда не становится active — ненулевой код', () => {
+    const sb = makeDeploySandbox();
+    const res = deploy({ ...sb, env: { LINGER: 'yes', ACTIVE_FROM: '999' } });
+
+    expect(res.code).not.toBe(0);
+    expect(res.stdout).not.toContain('🎉');
+    expect(res.stderr).toContain('не перешла в состояние active');
+  });
+
+  test('порт задан и слушается — код 0', () => {
+    const sb = makeDeploySandbox({
+      packageJson: {
+        name: 'myapp',
+        pizdeploy: { port: 1234 },
+        scripts: {
+          build: "sh -c 'mkdir -p dist && echo built > dist/index.js'",
+          start: 'node dist/index.js',
+        },
+      },
+    });
+    const res = deploy({ ...sb, env: { LINGER: 'yes', PORT_LISTEN: 'yes' } });
+
+    expect(res.code).toBe(0);
+    expect(res.calls.some((c) => c.includes('ss -tln') && c.includes('p=1234'))).toBe(true);
+  });
+
+  test('порт задан, но не слушается — ненулевой код с указанием порта', () => {
+    const sb = makeDeploySandbox({
+      packageJson: {
+        name: 'myapp',
+        pizdeploy: { port: 1234 },
+        scripts: {
+          build: "sh -c 'mkdir -p dist && echo built > dist/index.js'",
+          start: 'node dist/index.js',
+        },
+      },
+    });
+    const res = deploy({ ...sb, env: { LINGER: 'yes', PORT_LISTEN: 'no', LISTENING: '22 3000' } });
+
+    expect(res.code).not.toBe(0);
+    expect(res.stdout).not.toContain('🎉');
+    expect(res.stderr).toContain('порт 1234');
+    expect(res.stderr).toContain('3000');
+  });
+
+  test('порт не задан — проверка прослушивания пропускается', () => {
+    const sb = makeDeploySandbox();
+    const res = deploy({ ...sb, env: { LINGER: 'yes' } });
+
+    expect(res.code).toBe(0);
+    expect(res.calls.filter((c) => c.includes('ss -tln')).length).toBe(0);
+  });
+
+  test('растущий NRestarts трактуется как неуспех', () => {
+    const sb = makeDeploySandbox();
+    const res = deploy({
+      ...sb,
+      env: { LINGER: 'yes', NRESTARTS_BEFORE: '0', NRESTARTS_AFTER: '3' },
+    });
+
+    expect(res.code).not.toBe(0);
+    expect(res.stdout).not.toContain('🎉');
+    expect(res.stderr).toContain('перезапустилась');
+  });
+
+  test('успешный вывод содержит URL при наличии порта и не содержит строку службы', () => {
+    const sb = makeDeploySandbox({
+      packageJson: {
+        name: 'myapp',
+        pizdeploy: { port: 1234 },
+        scripts: {
+          build: "sh -c 'mkdir -p dist && echo built > dist/index.js'",
+          start: 'node dist/index.js',
+        },
+      },
+    });
+    const res = deploy({ ...sb, env: { LINGER: 'yes' } });
+
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain('🎉 Успешно развернут релиз:');
+    expect(res.stdout).toContain('URL: http://zero.local:1234');
+    expect(res.stdout).not.toContain('Служба:');
+  });
+
+  test('без порта вывод не содержит строку службы и сообщение о пропуске проверки', () => {
+    const sb = makeDeploySandbox();
+    const res = deploy({ ...sb, env: { LINGER: 'yes' } });
+
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain('🎉 Успешно развернут релиз:');
+    expect(res.stdout).not.toContain('Служба:');
+    expect(res.stdout).not.toContain('порт не задан');
+    expect(res.stdout).not.toContain('URL:');
+  });
+
+  test('переменные окружения PIZDEPLOY_VERIFY_INTERVAL_MS и PIZDEPLOY_STABLE_HOLD_MS ускоряют верификацию', () => {
+    const sb = makeDeploySandbox();
+    const res = deploy({
+      ...sb,
+      env: {
+        LINGER: 'yes',
+        PIZDEPLOY_VERIFY_TIMEOUT_MS: '500',
+        PIZDEPLOY_VERIFY_INTERVAL_MS: '50',
+        PIZDEPLOY_STABLE_HOLD_MS: '50',
       },
     });
 
     expect(res.code).toBe(0);
-    expect(res.stdout).toContain("🎉 Успешно развернут релиз:");
+    expect(res.stdout).toContain('🎉 Успешно развернут релиз:');
   });
 });

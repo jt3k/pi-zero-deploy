@@ -6,7 +6,7 @@ After=default.target
 Type=simple
 Restart=always
 RestartSec=2
-Environment="NODE_MODULES=production"
+Environment="NODE_ENV=production"
 Environment="CUSTOM_APP_FLAG=active"
 
 [Install]

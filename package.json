@@ -1,8 +1,17 @@
 {
   "name": "pizdeploy",
   "version": "0.1.0",
+  "description": "Zero-privilege user-mode deployment tool for Raspberry Pi and single-board computers",
   "type": "module",
-  "private": true,
+  "license": "MIT",
+  "keywords": [
+    "raspberry-pi",
+    "deployment",
+    "systemd",
+    "zero-privilege",
+    "bun",
+    "nodejs"
+  ],
   "bin": {
     "pizdeploy": "src/index.ts"
   },

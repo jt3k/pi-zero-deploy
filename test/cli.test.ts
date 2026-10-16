@@ -98,9 +98,10 @@ afterAll(() => {
 
 describe('ошибки использования', () => {
   const cases: Array<[string, string[]]> = [
-    ['неизвестный аргумент --help', ['--help']],
+    ['неизвестный аргумент --unknown', ['--unknown']],
     ['неизвестный аргумент deploy prod', ['deploy', 'prod']],
     ['--ssh без значения', ['--ssh']],
+    ['--ssh с ведущим дефисом (argument injection)', ['--ssh', '-oProxyCommand=calc']],
   ];
 
   for (const [name, args] of cases) {
@@ -117,8 +118,42 @@ describe('ошибки использования', () => {
 
   test('ошибка использования не запускает деплой', () => {
     const sandbox = makeSandbox();
-    const result = run({ args: ['--help'], cwd: sandbox.cwd, pathValue: sandbox.pathValue });
+    const result = run({ args: ['--unknown'], cwd: sandbox.cwd, pathValue: sandbox.pathValue });
     expect(result.stdout).toBe('');
+  });
+
+  test('недопустимое имя службы в подкоманде: код 2, usage в stderr', () => {
+    const sandbox = makeSandbox();
+    const result = run({
+      args: ['stop', 'app;rm -rf /'],
+      cwd: sandbox.cwd,
+      pathValue: sandbox.pathValue,
+    });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('usage: pizdeploy');
+  });
+});
+
+describe('флаги --help и --version', () => {
+  test('--help и -h выводят справочное руководство и завершаются с кодом 0', () => {
+    for (const flag of ['--help', '-h']) {
+      const sandbox = makeSandbox();
+      const result = run({ args: [flag], cwd: sandbox.cwd, pathValue: sandbox.pathValue });
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('pi zero deploy (pizdeploy)');
+      expect(result.stdout).toContain('Usage:');
+      expect(result.stderr).toBe('');
+    }
+  });
+
+  test('--version и -v выводят версию утилиты и завершаются с кодом 0', () => {
+    for (const flag of ['--version', '-v']) {
+      const sandbox = makeSandbox();
+      const result = run({ args: [flag], cwd: sandbox.cwd, pathValue: sandbox.pathValue });
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('pizdeploy v');
+      expect(result.stderr).toBe('');
+    }
   });
 });
 
@@ -131,7 +166,7 @@ describe('флаг --dry-run', () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain('Dry-Run');
     expect(result.stdout).toContain('myapp_mock5');
-    expect(result.stdout).toContain('/home/pi/projects/myapp/releases/');
+    expect(result.stdout).toContain('$HOME/projects/myapp/releases/');
   });
 
   test('--dry-run работает вместе с --ssh', () => {
@@ -523,7 +558,7 @@ describe('подкоманды stop и disable', () => {
         true,
       );
       expect(calls.some((c) => c.includes('systemctl --user daemon-reload'))).toBe(true);
-      expect(calls.some((c) => c.includes('rm -f /home/pi/projects/my-app/current'))).toBe(true);
+      expect(calls.some((c) => c.includes('rm -f $HOME/projects/my-app/current'))).toBe(true);
       expect(result.stdout).toContain(
         '🗑 Служба my-app.service удалена и снята с учёта на pi@zero.local',
       );

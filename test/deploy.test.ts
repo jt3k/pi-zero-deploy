@@ -19,6 +19,10 @@ import {
   scpOptions,
   userFromHost,
   detectAutobuildEntry,
+  validateName,
+  validateService,
+  validateHost,
+  validatePort,
 } from '../src/index';
 
 const repoRoot = join(import.meta.dir, '..');
@@ -263,10 +267,13 @@ describe('вспомогательные функции', () => {
     expect(res.stdout).toContain('🔨 Автоматическая сборка:');
     expect(res.stdout).toContain('🎉 Успешно развернут релиз:');
     const unitCall = res.calls.find((c) =>
-      c.includes('cat > ~/.config/systemd/user/micro-app.service'),
+      c.includes('base64 -d > ~/.config/systemd/user/micro-app.service'),
     );
     expect(unitCall).toBeDefined();
-    expect(unitCall).toContain('ExecStart=/usr/bin/node app.mjs');
+    const match = unitCall!.match(/echo '([^']+)' \| base64 -d/);
+    expect(match).toBeDefined();
+    const decoded = Buffer.from(match![1], 'base64').toString('utf8');
+    expect(decoded).toContain('ExecStart=/usr/bin/node app.mjs');
   });
 
   test('деплой проекта без scripts.build с нераспознанным start выводит подсказку', () => {
@@ -291,7 +298,7 @@ describe('генерация unit-файла', () => {
     const unit = renderUnit('my-app', '/usr/bin/node index.js');
     expect(unit).toContain('Description=my-app');
     expect(unit).toContain('After=default.target');
-    expect(unit).toContain('WorkingDirectory=/home/pi/projects/my-app/current');
+    expect(unit).toContain('WorkingDirectory=%h/projects/my-app/current');
     expect(unit).toContain('ExecStart=/usr/bin/node index.js');
     expect(unit).toContain('Environment="NODE_ENV=production"');
     expect(unit).not.toContain('PORT=');
@@ -300,7 +307,7 @@ describe('генерация unit-файла', () => {
 
   test('дефолтный шаблон с заданным портом содержит Environment=PORT', () => {
     const unit = renderUnit('my-app', '/usr/bin/node index.js', 1234);
-    expect(unit).toContain('WorkingDirectory=/home/pi/projects/my-app/current');
+    expect(unit).toContain('WorkingDirectory=%h/projects/my-app/current');
     expect(unit).toContain('ExecStart=/usr/bin/node index.js');
     expect(unit).toContain('Environment="PORT=1234"');
     expect(unit).toContain('Environment="NODE_ENV=production"');
@@ -328,7 +335,7 @@ describe('генерация unit-файла', () => {
     try {
       const unit = renderUnit('tg-bot', '/usr/bin/node bot.js', undefined, tmpTemplate);
       expect(unit).toContain('Description=My Custom Telegram Bot');
-      expect(unit).toContain('WorkingDirectory=/home/pi/projects/tg-bot/current');
+      expect(unit).toContain('WorkingDirectory=%h/projects/tg-bot/current');
       expect(unit).toContain('ExecStart=/usr/bin/node bot.js');
       expect(unit).toContain('Restart=always');
       expect(unit).toContain('RestartSec=2');
@@ -385,7 +392,7 @@ describe('генерация unit-файла', () => {
 
     try {
       const unit = renderUnit('new-service', '/usr/bin/node server.js', undefined, tmpTemplate);
-      expect(unit).toContain('WorkingDirectory=/home/pi/projects/new-service/current');
+      expect(unit).toContain('WorkingDirectory=%h/projects/new-service/current');
       expect(unit).toContain('ExecStart=/usr/bin/node server.js');
       expect(unit).toContain('Restart=always');
       expect(unit).toContain('RestartSec=2');
@@ -431,12 +438,16 @@ describe('отказ от sudo', () => {
 
     expect(res.code).toBe(0);
     const unitCall = res.calls.find((c) =>
-      c.includes('cat > ~/.config/systemd/user/myapp.service'),
+      c.includes('base64 -d > ~/.config/systemd/user/myapp.service'),
     );
     expect(unitCall).toBeDefined();
-    expect(unitCall).toContain('ExecStart=/usr/bin/node index.js');
-    expect(unitCall).toContain('Environment="PORT=1234"');
-    expect(unitCall).toContain('WantedBy=default.target');
+    const match1 = unitCall!.match(/echo '([^']+)' \| base64 -d/);
+    expect(match1).toBeDefined();
+    const decoded1 = Buffer.from(match1![1], 'base64').toString('utf8');
+    expect(decoded1).toContain('ExecStart=/usr/bin/node index.js');
+    expect(decoded1).toContain('Environment="PORT=1234"');
+    expect(decoded1).toContain('WantedBy=default.target');
+    expect(decoded1).toContain('WorkingDirectory=%h/projects/myapp/current');
   });
 
   test('каталог systemd/ проекта игнорируется и не передаётся на хост', () => {
@@ -453,10 +464,14 @@ describe('отказ от sudo', () => {
     expect(res.scp.join('\n')).not.toContain('.service');
     expect(res.scp.join('\n')).toContain('dist.tar.gz');
     const unitCall = res.calls.find((c) =>
-      c.includes('cat > ~/.config/systemd/user/myapp.service'),
+      c.includes('base64 -d > ~/.config/systemd/user/myapp.service'),
     );
-    expect(unitCall).toContain('ExecStart=/usr/bin/node index.js');
-    expect(unitCall).not.toContain('legacy.js');
+    expect(unitCall).toBeDefined();
+    const match2 = unitCall!.match(/echo '([^']+)' \| base64 -d/);
+    expect(match2).toBeDefined();
+    const decoded2 = Buffer.from(match2![1], 'base64').toString('utf8');
+    expect(decoded2).toContain('ExecStart=/usr/bin/node index.js');
+    expect(decoded2).not.toContain('legacy.js');
   });
 });
 
@@ -555,10 +570,8 @@ describe('проверка кода возврата каждого шага', (
 
     expect(res.code).not.toBe(0);
     expect(res.stdout).not.toContain('🎉');
-    expect(res.calls.some((c) => c.includes('rm -f /home/pi/projects/myapp/current'))).toBe(true);
-    expect(res.calls.some((c) => c.includes('ln -sfn /home/pi/projects/myapp/current'))).toBe(
-      false,
-    );
+    expect(res.calls.some((c) => c.includes('rm -f $HOME/projects/myapp/current'))).toBe(true);
+    expect(res.calls.some((c) => c.includes('ln -sfn $HOME/projects/myapp/current'))).toBe(false);
   });
 
   test('каталог неудачного релиза остаётся на диске', () => {
@@ -689,5 +702,49 @@ describe('верификация работоспособности', () => {
 
     expect(res.code).toBe(0);
     expect(res.stdout).toContain('🎉 Успешно развернут релиз:');
+  });
+});
+
+describe('функции валидации входных данных', () => {
+  test('validateName: разрешает безопасные имена и отклоняет path traversal и спецсимволы', () => {
+    expect(validateName('my-app')).toBe(true);
+    expect(validateName('my_app.service')).toBe(true);
+    expect(validateName('app-123')).toBe(true);
+    expect(validateName('')).toBe(false);
+    expect(validateName('.')).toBe(false);
+    expect(validateName('..')).toBe(false);
+    expect(validateName('../evil')).toBe(false);
+    expect(validateName('my app')).toBe(false);
+    expect(validateName('app;rm -rf /')).toBe(false);
+    expect(validateName('app$()')).toBe(false);
+  });
+
+  test('validateService: требует суффикс .service и безопасную основу', () => {
+    expect(validateService('my-app.service')).toBe(true);
+    expect(validateService('bot.service')).toBe(true);
+    expect(validateService('my-app')).toBe(false);
+    expect(validateService('.service')).toBe(false);
+    expect(validateService('my app.service')).toBe(false);
+    expect(validateService('my;app.service')).toBe(false);
+  });
+
+  test('validateHost: запрещает ведущие дефисы и спецсимволы shell', () => {
+    expect(validateHost('pi@zero.local')).toBe(true);
+    expect(validateHost('custom.host')).toBe(true);
+    expect(validateHost('user@192.168.1.50')).toBe(true);
+    expect(validateHost('-oProxyCommand=calc.exe')).toBe(false);
+    expect(validateHost('')).toBe(false);
+    expect(validateHost('host;rm -rf /')).toBe(false);
+    expect(validateHost('host && whoami')).toBe(false);
+  });
+
+  test('validatePort: разрешает целые числа 1..65535', () => {
+    expect(validatePort(80)).toBe(80);
+    expect(validatePort('3000')).toBe(3000);
+    expect(validatePort(65535)).toBe(65535);
+    expect(validatePort(0)).toBeUndefined();
+    expect(validatePort(70000)).toBeUndefined();
+    expect(validatePort(-1)).toBeUndefined();
+    expect(validatePort('invalid')).toBeUndefined();
   });
 });

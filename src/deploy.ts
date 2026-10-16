@@ -126,6 +126,26 @@ export async function verifyService(
   return { ok: true, reason: '' };
 }
 
+/**
+ * Формирует bash-команду безопасной ротации релизов:
+ * 1. Защищает активный релиз (симлинк current), никогда не удаляя его.
+ * 2. Сортирует директории по mtime (ls -1td), сохраняя 3 самых свежих.
+ * 3. Удаляет устаревшие неактивные релизы.
+ */
+export function buildRotationScript(releasesDir: string, currentLink: string): string {
+  return [
+    `cur=$(readlink -f "${currentLink}" 2>/dev/null || true)`,
+    `cd "${releasesDir}" 2>/dev/null && \\`,
+    `for d in $(ls -1td */ 2>/dev/null | tail -n +4); do`,
+    `  full=$(readlink -f "$d" 2>/dev/null || true)`,
+    `  if [[ -n "$cur" && "$full" == "$cur" ]]; then`,
+    `    continue`,
+    `  fi`,
+    `  rm -rf "$d"`,
+    `done || true`,
+  ].join('\n');
+}
+
 export type DeployOptions = {
   host: string;
   name: string;
@@ -343,11 +363,7 @@ export async function handleDeploy(options: DeployOptions): Promise<number> {
     }
 
     // 14. Ротация: `|| true` допустим только здесь — сбой очистки не отменяет успех
-    await remoteExec(
-      sshOpts,
-      host,
-      `cd ${releasesDir} && ls -1d * 2>/dev/null | sort | head -n -3 | xargs rm -rf 2>/dev/null || true`,
-    );
+    await remoteExec(sshOpts, host, buildRotationScript(releasesDir, currentLink));
 
     const hostname = host.replace(/^.*@/, '');
     console.log(`🎉 Успешно развернут релиз: ${relId}`);

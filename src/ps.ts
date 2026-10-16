@@ -42,9 +42,13 @@ for p in "$projects_dir"/*; do
     if [[ "$astate" == "active" && "$main_pid" =~ ^[0-9]+$ && "$main_pid" -gt 0 ]]; then
       stat="running"
       m_pid="$main_pid"
+    elif [[ "$astate" == "activating" ]]; then
+      stat="restarting"
+    elif [[ "$astate" == "failed" ]]; then
+      stat="failed"
     fi
   fi
-  [[ $has_current -eq 0 && "$stat" != "running" ]] && continue
+  [[ $has_current -eq 0 && "$stat" == "inactive" ]] && continue
   [[ $first -eq 0 ]] && printf ","
   first=0
   printf "{\\"project\\":\\"%s\\",\\"release\\":\\"%s\\",\\"status\\":\\"%s\\",\\"port\\":%s,\\"pid\\":%s}" \

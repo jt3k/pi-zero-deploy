@@ -632,15 +632,17 @@ describe('обнаружение процессов и состояний в ps'
     const script = buildPsScript();
     expect(script).toContain('systemctl --user show');
     expect(script).toContain('-p ActiveState -p MainPID');
+    expect(script).toContain('stat="restarting"');
+    expect(script).toContain('stat="failed"');
     expect(script).not.toContain('unit_name_of');
   });
 
-  test('три состояния различимы: нет релиза / релиз не запущен / запущен', () => {
+  test('состояния различимы: нет релиза / не запущен / запущен / restarting / failed', () => {
     const sandbox = makeSandbox();
     const sshStub = join(sandbox.base, 'fake-bin', 'ssh');
     writeFileSync(
       sshStub,
-      '#!/bin/sh\ncase "$*" in\n  *bash*) echo \'[{"project":"no-release","release":"-","status":"inactive","port":null,"pid":null},{"project":"stopped","release":"stopped_ab12c","status":"inactive","port":null,"pid":null},{"project":"running","release":"running_de34f","status":"running","port":"3000","pid":"42"}]\' ;;\n  *) exit 0 ;;\nesac\n',
+      '#!/bin/sh\ncase "$*" in\n  *bash*) echo \'[{"project":"no-release","release":"-","status":"inactive","port":null,"pid":null},{"project":"stopped","release":"stopped_ab12c","status":"inactive","port":null,"pid":null},{"project":"running","release":"running_de34f","status":"running","port":"3000","pid":"42"},{"project":"restarting-app","release":"app_11111","status":"restarting","port":null,"pid":null},{"project":"failed-app","release":"app_22222","status":"failed","port":null,"pid":null}]\' ;;\n  *) exit 0 ;;\nesac\n',
     );
     chmodSync(sshStub, 0o755);
 
@@ -650,11 +652,15 @@ describe('обнаружение процессов и состояний в ps'
     const noRelease = rows.find((l) => l.includes('no-release')) ?? '';
     const stopped = rows.find((l) => l.includes('stopped')) ?? '';
     const running = rows.find((l) => l.includes('running')) ?? '';
+    const restarting = rows.find((l) => l.includes('restarting-app')) ?? '';
+    const failed = rows.find((l) => l.includes('failed-app')) ?? '';
 
     // «Нет релиза» и «релиз есть, не запущен» обязаны отличаться непустым релизом.
     expect(noRelease).not.toBe(stopped);
     expect(stopped).toContain('stopped_ab12c');
     expect(stopped).toContain('inactive');
     expect(running).toContain('http://zero.local:3000');
+    expect(restarting).toContain('restarting');
+    expect(failed).toContain('failed');
   });
 });

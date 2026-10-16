@@ -23,7 +23,14 @@ import {
   resolvePort,
 } from './config';
 import type { DeployOptions } from './deploy';
-import { ensureLinger, handleDeploy, portListenCheck, readRestarts, verifyService } from './deploy';
+import {
+  buildRotationScript,
+  ensureLinger,
+  handleDeploy,
+  portListenCheck,
+  readRestarts,
+  verifyService,
+} from './deploy';
 import { buildPsScript, handlePs } from './ps';
 import { handleServiceControl } from './service';
 import {
@@ -76,6 +83,7 @@ export {
   readRestarts,
   portListenCheck,
   verifyService,
+  buildRotationScript,
   handleDeploy,
 };
 

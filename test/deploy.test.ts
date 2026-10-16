@@ -23,6 +23,7 @@ import {
   validateService,
   validateHost,
   validatePort,
+  buildRotationScript,
 } from '../src/index';
 
 const repoRoot = join(import.meta.dir, '..');
@@ -746,5 +747,119 @@ describe('функции валидации входных данных', () => 
     expect(validatePort(70000)).toBeUndefined();
     expect(validatePort(-1)).toBeUndefined();
     expect(validatePort('invalid')).toBeUndefined();
+  });
+});
+
+describe('buildRotationScript: безопасная ротация релизов', () => {
+  test('генерирует корректную команду с проверкой current и сортировкой по mtime', () => {
+    const script = buildRotationScript('$HOME/projects/app/releases', '$HOME/projects/app/current');
+    expect(script).toContain('readlink -f "$HOME/projects/app/current"');
+    expect(script).toContain('cd "$HOME/projects/app/releases"');
+    expect(script).toContain('ls -1td */ 2>/dev/null | tail -n +4');
+    expect(script).toContain('if [[ -n "$cur" && "$full" == "$cur" ]]; then');
+    expect(script).toContain('continue');
+    expect(script).toContain('rm -rf "$d"');
+  });
+
+  test('сохраняет 3 последних релиза при наличии 4 релизов', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pizdeploy-rot-test-'));
+    try {
+      const releasesDir = join(dir, 'releases');
+      const currentLink = join(dir, 'current');
+      mkdirSync(releasesDir, { recursive: true });
+
+      const r1 = join(releasesDir, 'rel_1');
+      const r2 = join(releasesDir, 'rel_2');
+      const r3 = join(releasesDir, 'rel_3');
+      const r4 = join(releasesDir, 'rel_4');
+      mkdirSync(r1);
+      await Bun.sleep(15);
+      mkdirSync(r2);
+      await Bun.sleep(15);
+      mkdirSync(r3);
+      await Bun.sleep(15);
+      mkdirSync(r4);
+
+      // current указывает на новейший r4
+      const { symlinkSync } = await import('node:fs');
+      symlinkSync(r4, currentLink);
+
+      const script = buildRotationScript(releasesDir, currentLink);
+      const proc = Bun.spawnSync(['bash', '-c', script]);
+      expect(proc.exitCode).toBe(0);
+
+      const { existsSync } = await import('node:fs');
+      expect(existsSync(r1)).toBe(false);
+      expect(existsSync(r2)).toBe(true);
+      expect(existsSync(r3)).toBe(true);
+      expect(existsSync(r4)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('никогда не удаляет релиз, на который указывает current, даже если он старейший', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pizdeploy-rot-test-'));
+    try {
+      const releasesDir = join(dir, 'releases');
+      const currentLink = join(dir, 'current');
+      mkdirSync(releasesDir, { recursive: true });
+
+      const r1 = join(releasesDir, 'rel_1');
+      const r2 = join(releasesDir, 'rel_2');
+      const r3 = join(releasesDir, 'rel_3');
+      const r4 = join(releasesDir, 'rel_4');
+      mkdirSync(r1);
+      await Bun.sleep(15);
+      mkdirSync(r2);
+      await Bun.sleep(15);
+      mkdirSync(r3);
+      await Bun.sleep(15);
+      mkdirSync(r4);
+
+      // current указывает на старейший r1
+      const { symlinkSync } = await import('node:fs');
+      symlinkSync(r1, currentLink);
+
+      const script = buildRotationScript(releasesDir, currentLink);
+      const proc = Bun.spawnSync(['bash', '-c', script]);
+      expect(proc.exitCode).toBe(0);
+
+      const { existsSync } = await import('node:fs');
+      // r1 защищен через current, поэтому не удален; r2, r3, r4 тоже остались (всего 4)
+      expect(existsSync(r1)).toBe(true);
+      expect(existsSync(r2)).toBe(true);
+      expect(existsSync(r3)).toBe(true);
+      expect(existsSync(r4)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('не удаляет ничего, если релизов 3 или меньше', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pizdeploy-rot-test-'));
+    try {
+      const releasesDir = join(dir, 'releases');
+      const currentLink = join(dir, 'current');
+      mkdirSync(releasesDir, { recursive: true });
+
+      const r1 = join(releasesDir, 'rel_1');
+      const r2 = join(releasesDir, 'rel_2');
+      mkdirSync(r1);
+      mkdirSync(r2);
+
+      const { symlinkSync } = await import('node:fs');
+      symlinkSync(r2, currentLink);
+
+      const script = buildRotationScript(releasesDir, currentLink);
+      const proc = Bun.spawnSync(['bash', '-c', script]);
+      expect(proc.exitCode).toBe(0);
+
+      const { existsSync } = await import('node:fs');
+      expect(existsSync(r1)).toBe(true);
+      expect(existsSync(r2)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

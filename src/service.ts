@@ -1,4 +1,5 @@
 import { REMOTE_PROJECTS_ROOT } from './config';
+import { formatStepSuccess } from './format';
 import { closeControlMaster, remoteExec, socketPathFor, sshOptions } from './ssh';
 import type { ServiceAction } from './types';
 
@@ -39,15 +40,22 @@ rm -f ~/.config/systemd/user/${service}
 systemctl --user daemon-reload
 rm -f ${REMOTE_PROJECTS_ROOT}/${proj}/current
 `;
+      const startRemove = performance.now();
       const res = await remoteExec(sshOpts, host, remoteCmd);
       if (res.exitCode !== 0) {
         console.error(res.stderr.trim() || `Ошибка при удалении службы ${service}`);
         return res.exitCode || 1;
       }
-      console.log(`🗑 Служба ${service} удалена и снята с учёта на ${host}`);
+      console.log(
+        formatStepSuccess(
+          `🗑 Служба ${service} удалена и снята с учёта на ${host}`,
+          performance.now() - startRemove,
+        ),
+      );
       return 0;
     }
 
+    const startCmd = performance.now();
     const remoteCmd = `if systemctl --user cat ${service} >/dev/null 2>&1; then systemctl --user ${action} ${service}; else echo "not_found"; exit 1; fi`;
     const res = await remoteExec(sshOpts, host, remoteCmd);
     if (res.exitCode !== 0) {
@@ -59,14 +67,17 @@ rm -f ${REMOTE_PROJECTS_ROOT}/${proj}/current
       return res.exitCode || 1;
     }
 
+    const elapsed = performance.now() - startCmd;
     if (action === 'start') {
-      console.log(`▶️ Служба ${service} запущена на ${host}`);
+      console.log(formatStepSuccess(`▶️ Служба ${service} запущена на ${host}`, elapsed));
     } else if (action === 'stop') {
-      console.log(`⏹ Служба ${service} остановлена на ${host}`);
+      console.log(formatStepSuccess(`⏹ Служба ${service} остановлена на ${host}`, elapsed));
     } else if (action === 'restart') {
-      console.log(`🔄 Служба ${service} перезапущена на ${host}`);
+      console.log(formatStepSuccess(`🔄 Служба ${service} перезапущена на ${host}`, elapsed));
     } else if (action === 'disable') {
-      console.log(`🛑 Автозапуск службы ${service} отключен на ${host}`);
+      console.log(
+        formatStepSuccess(`🛑 Автозапуск службы ${service} отключен на ${host}`, elapsed),
+      );
     }
     return 0;
   } finally {

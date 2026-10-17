@@ -509,12 +509,13 @@ describe('linger', () => {
 });
 
 describe('проверка кода возврата каждого шага', () => {
-  test('отказ распаковки: ненулевой код, пустой stdout, current не переключается', () => {
+  test('отказ распаковки: ненулевой код, current не переключается', () => {
     const sb = makeDeploySandbox();
     const res = deploy({ ...sb, env: { LINGER: 'yes', FAIL_ON: 'tar -xzf' } });
 
     expect(res.code).not.toBe(0);
-    expect(res.stdout).toBe('');
+    expect(res.stdout).not.toContain('🎉');
+    expect(res.stdout).toContain('✓ подготовка каталогов');
     expect(res.stderr).toContain('распаковка релиза');
     expect(res.calls.some((c) => c.includes('mv -fT'))).toBe(false);
   });
@@ -533,8 +534,28 @@ describe('проверка кода возврата каждого шага', (
     const res = deploy({ ...sb, env: { LINGER: 'yes', SCP_EXIT: '1' } });
 
     expect(res.code).toBe(1);
-    expect(res.stdout).toBe('');
+    expect(res.stdout).not.toContain('🎉');
     expect(res.calls.some((c) => c.includes('tar -xzf'))).toBe(false);
+  });
+
+  test('успешный деплой выводит статус каждого шага в стиле bun test с таймингами', () => {
+    const sb = makeDeploySandbox();
+    const res = deploy({ ...sb, env: { LINGER: 'yes' } });
+
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain('✓ сборка проекта [');
+    expect(res.stdout).toContain('✓ упаковка архива [');
+    expect(res.stdout).toContain('✓ подготовка каталогов [');
+    expect(res.stdout).toContain('✓ доставка архива [');
+    expect(res.stdout).toContain('✓ проверка linger [');
+    expect(res.stdout).toContain('✓ распаковка релиза [');
+    expect(res.stdout).toContain('✓ переключение current [');
+    expect(res.stdout).toContain('✓ запись user-юнита [');
+    expect(res.stdout).toContain('✓ daemon-reload [');
+    expect(res.stdout).toContain('✓ включение службы [');
+    expect(res.stdout).toContain('✓ верификация службы [');
+    expect(res.stdout).toContain('✓ ротация старых релизов [');
+    expect(res.stdout).toMatch(/\[\d+\.\d+(ms|s)\]/);
   });
 
   test('сбой ротации не отменяет успешный деплой', () => {

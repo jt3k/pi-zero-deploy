@@ -1,4 +1,5 @@
 import { $ } from 'bun';
+import { formatStepSuccess } from './format';
 import type { RemoteResult } from './types';
 
 /** Имя пользователя, под которым идём по SSH (для linger). */
@@ -71,11 +72,14 @@ export async function runStep(
   label: string,
   command: string,
 ): Promise<number> {
+  const start = performance.now();
   const res = await remoteExec(sshOpts, host, command);
+  const elapsed = performance.now() - start;
   if (res.exitCode !== 0) {
     const reason = res.stderr.trim() || res.stdout.trim() || 'сообщение не получено';
     console.error(`pizdeploy: шаг «${label}» завершился с кодом ${res.exitCode}: ${reason}`);
     return res.exitCode || 1;
   }
+  console.log(formatStepSuccess(label, elapsed));
   return 0;
 }

@@ -1,5 +1,5 @@
 import { $ } from 'bun';
-import { formatStepSuccess } from './format';
+import { withStep } from './format';
 import type { RemoteResult } from './types';
 
 /** Имя пользователя, под которым идём по SSH (для linger). */
@@ -50,15 +50,28 @@ export async function remoteExec(
   host: string,
   command: string,
 ): Promise<RemoteResult> {
-  const proc = Bun.spawnSync(['ssh', ...sshOpts, host, command], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  return {
-    exitCode: proc.exitCode ?? 1,
-    stdout: proc.stdout?.toString() ?? '',
-    stderr: proc.stderr?.toString() ?? '',
-  };
+  try {
+    const proc = Bun.spawn(['ssh', ...sshOpts, host, command], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return {
+      exitCode,
+      stdout,
+      stderr,
+    };
+  } catch (err) {
+    return {
+      exitCode: 1,
+      stdout: '',
+      stderr: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 export async function closeControlMaster(host: string, socketPath: string): Promise<void> {
@@ -72,14 +85,13 @@ export async function runStep(
   label: string,
   command: string,
 ): Promise<number> {
-  const start = performance.now();
-  const res = await remoteExec(sshOpts, host, command);
-  const elapsed = performance.now() - start;
-  if (res.exitCode !== 0) {
-    const reason = res.stderr.trim() || res.stdout.trim() || 'сообщение не получено';
-    console.error(`pizdeploy: шаг «${label}» завершился с кодом ${res.exitCode}: ${reason}`);
-    return res.exitCode || 1;
-  }
-  console.log(formatStepSuccess(label, elapsed));
-  return 0;
+  return withStep(label, async () => {
+    const res = await remoteExec(sshOpts, host, command);
+    if (res.exitCode !== 0) {
+      const reason = res.stderr.trim() || res.stdout.trim() || 'сообщение не получено';
+      console.error(`pizdeploy: шаг «${label}» завершился с кодом ${res.exitCode}: ${reason}`);
+      return res.exitCode || 1;
+    }
+    return 0;
+  });
 }

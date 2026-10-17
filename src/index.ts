@@ -43,7 +43,15 @@ import {
   userFromHost,
 } from './ssh';
 import type { AutobuildInfo, ParsedCli, RemoteResult, ServiceAction } from './types';
-import { formatDuration, formatStepSuccess, isColorSupported } from './format';
+import {
+  SNAKE_FRAMES,
+  formatDuration,
+  formatStepFailure,
+  formatStepSuccess,
+  isColorSupported,
+  isInteractive,
+  withStep,
+} from './format';
 import { handleInit, renderUnit } from './unit';
 
 // Реэкспорт всех публичных типов и функций для полной обратной совместимости с тестами и API
@@ -89,7 +97,11 @@ export {
   handleDeploy,
   formatDuration,
   formatStepSuccess,
+  formatStepFailure,
   isColorSupported,
+  isInteractive,
+  SNAKE_FRAMES,
+  withStep,
 };
 
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {

@@ -19,7 +19,7 @@ import {
   userFromHost,
 } from './ssh';
 import { renderUnit } from './unit';
-import { formatDuration, formatStepSuccess } from './format';
+import { formatDuration, withStep } from './format';
 
 /**
  * Ленивое включение linger: перед установкой юнита. Идемпотентно и не требует
@@ -212,11 +212,9 @@ export async function handleDeploy(options: DeployOptions): Promise<number> {
     const hasCustomBuild =
       typeof pkg?.scripts?.build === 'string' && pkg.scripts.build.trim().length > 0;
 
-    const startBuild = performance.now();
     if (hasCustomBuild) {
-      const buildResult = await $`bun run build`.nothrow();
+      const buildResult = await withStep('сборка проекта', () => $`bun run build`.nothrow());
       if (buildResult.exitCode !== 0) return buildResult.exitCode;
-      console.log(formatStepSuccess('сборка проекта', performance.now() - startBuild));
     } else {
       const rawStart = (pkg as { scripts?: { start?: string } })?.scripts?.start || '';
       const autobuild = detectAutobuildEntry(rawStart);
@@ -236,21 +234,20 @@ export async function handleDeploy(options: DeployOptions): Promise<number> {
       console.log(
         `🔨 Автоматическая сборка: bun build ${autobuild.entryPath} -> ./dist/${autobuild.outputFileName}`,
       );
-      const startAuto = performance.now();
-      const buildResult =
-        await $`bun build ${autobuild.entryPath} --target=node --outfile=./dist/${autobuild.outputFileName} --minify`.nothrow();
+      const buildResult = await withStep('автоматическая сборка', () =>
+        $`bun build ${autobuild.entryPath} --target=node --outfile=./dist/${autobuild.outputFileName} --minify`.nothrow(),
+      );
       if (buildResult.exitCode !== 0) {
         return buildResult.exitCode;
       }
-      console.log(formatStepSuccess('автоматическая сборка', performance.now() - startAuto));
       effectiveExecStart = autobuild.execStart;
     }
 
     // 2. Упаковка
-    const startTar = performance.now();
-    const tarResult = await $`tar -czf ${tempArchive} -C ./dist .`.nothrow();
+    const tarResult = await withStep('упаковка архива', () =>
+      $`tar -czf ${tempArchive} -C ./dist .`.nothrow(),
+    );
     if (tarResult.exitCode !== 0) return tarResult.exitCode;
-    console.log(formatStepSuccess('упаковка архива', performance.now() - startTar));
 
     // 3. Хэш SHA-256 от архива
     const hasher = new Bun.CryptoHasher('sha256');
@@ -270,18 +267,17 @@ export async function handleDeploy(options: DeployOptions): Promise<number> {
     if (mkdirCode !== 0) return mkdirCode;
 
     // 5. Копирование архива в буфер incoming (по открытому сокету)
-    const startScp = performance.now();
-    const scpResult =
-      await $`scp ${scpOpts} ${tempArchive} ${host + ':' + incomingDir + '/dist.tar.gz'}`
+    const scpResult = await withStep('доставка архива', () =>
+      $`scp ${scpOpts} ${tempArchive} ${host + ':' + incomingDir + '/dist.tar.gz'}`
         .quiet()
-        .nothrow();
+        .nothrow(),
+    );
     if (scpResult.exitCode !== 0) {
       console.error(
         `pizdeploy: не удалось передать архив на ${host}: ${scpResult.stderr.toString().trim()}`,
       );
       return scpResult.exitCode;
     }
-    console.log(formatStepSuccess('доставка архива', performance.now() - startScp));
 
     // 6. Автозапуск пользовательской сессии (лениво, перед установкой юнита)
     const remoteUser =
@@ -290,10 +286,10 @@ export async function handleDeploy(options: DeployOptions): Promise<number> {
       console.error('pizdeploy: не удалось определить пользователя на целевом хосте');
       return 1;
     }
-    const startLinger = performance.now();
-    const lingerCode = await ensureLinger(sshOpts, host, remoteUser);
+    const lingerCode = await withStep('проверка linger', () =>
+      ensureLinger(sshOpts, host, remoteUser),
+    );
     if (lingerCode !== 0) return lingerCode;
-    console.log(formatStepSuccess('проверка linger', performance.now() - startLinger));
 
     // 7. Распаковка в releases/<relId> (current ещё не трогаем)
     const extractCode = await runStep(
@@ -351,8 +347,11 @@ export async function handleDeploy(options: DeployOptions): Promise<number> {
     if (enableCode !== 0) return enableCode;
 
     // 13. Верификация работоспособности; отказ = откат current
-    const startVerify = performance.now();
-    const verdict = await verifyService(sshOpts, host, service, port);
+    const verdict = await withStep(
+      'верификация службы',
+      () => verifyService(sshOpts, host, service, port),
+      { isSuccess: (res) => res.ok },
+    );
     if (!verdict.ok) {
       console.error(`pizdeploy: деплой не подтверждён — ${verdict.reason}`);
       if (prevTarget && prevTarget !== currentLink) {
@@ -374,12 +373,13 @@ export async function handleDeploy(options: DeployOptions): Promise<number> {
       }
       return 1;
     }
-    console.log(formatStepSuccess('верификация службы', performance.now() - startVerify));
 
     // 14. Ротация: `|| true` допустим только здесь — сбой очистки не отменяет успех
-    const startRotate = performance.now();
-    await remoteExec(sshOpts, host, buildRotationScript(releasesDir, currentLink));
-    console.log(formatStepSuccess('ротация старых релизов', performance.now() - startRotate));
+    await withStep(
+      'ротация старых релизов',
+      () => remoteExec(sshOpts, host, buildRotationScript(releasesDir, currentLink)),
+      { isSuccess: () => true },
+    );
 
     const totalDuration = performance.now() - startTotal;
     const hostname = host.replace(/^.*@/, '');

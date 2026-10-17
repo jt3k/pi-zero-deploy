@@ -31,7 +31,7 @@ import {
   readRestarts,
   verifyService,
 } from './deploy';
-import { buildPsScript, handlePs } from './ps';
+import { buildPsScript, formatPsRelease, handlePs } from './ps';
 import { handleServiceControl } from './service';
 import {
   closeControlMaster,
@@ -78,6 +78,7 @@ export {
   handleInit,
   handleServiceControl,
   buildPsScript,
+  formatPsRelease,
   handlePs,
   ensureLinger,
   readRestarts,

@@ -58,6 +58,26 @@ printf "]\\n"
 '`;
 }
 
+export function formatPsRelease(
+  project: string,
+  release: string,
+  maxProjectLen: number = project.length,
+): string {
+  let hash = '-';
+  if (release && release !== '-') {
+    if (release.startsWith(`${project}_`)) {
+      hash = release.slice(project.length + 1);
+    } else {
+      const idx = release.lastIndexOf('_');
+      hash = idx !== -1 ? release.slice(idx + 1) : release;
+    }
+  }
+
+  const effectiveMax = Math.max(maxProjectLen, project.length);
+  const paddedProject = project.padEnd(effectiveMax + 1);
+  return `${paddedProject}${hash}`;
+}
+
 export async function handlePs(host: string): Promise<number> {
   const socketPath = socketPathFor(host);
   const sshOpts = sshOptions(host, socketPath);
@@ -86,9 +106,9 @@ export async function handlePs(host: string): Promise<number> {
     }
 
     const hostname = host.replace(/^.*@/, '');
+    const maxProjectLen = data.reduce((max, item) => Math.max(max, item.project?.length || 0), 0);
     const rows = data.map((item) => ({
-      Project: item.project,
-      Release: item.release,
+      Release: formatPsRelease(item.project, item.release, maxProjectLen),
       Status: item.status,
       URL: item.port ? `http://${hostname}:${item.port}` : '-',
       PID: item.pid || '-',

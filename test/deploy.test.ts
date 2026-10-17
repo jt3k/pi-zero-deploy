@@ -24,6 +24,7 @@ import {
   validateHost,
   validatePort,
   buildRotationScript,
+  formatPsRelease,
 } from '../src/index';
 
 const repoRoot = join(import.meta.dir, '..');
@@ -747,6 +748,28 @@ describe('функции валидации входных данных', () => 
     expect(validatePort(70000)).toBeUndefined();
     expect(validatePort(-1)).toBeUndefined();
     expect(validatePort('invalid')).toBeUndefined();
+  });
+});
+
+describe('formatPsRelease: компактное форматирование столбца Release', () => {
+  test('выравнивает имя проекта слева и хеш справа с динамическим отступом', () => {
+    const maxLen = 7; // max('kmp', 'my-app', 'noproud') -> 'noproud'.length = 7
+    expect(formatPsRelease('kmp', 'kmp_3ea25', maxLen)).toBe('kmp     3ea25');
+    expect(formatPsRelease('my-app', 'my-app_00f62', maxLen)).toBe('my-app  00f62');
+    expect(formatPsRelease('noproud', 'noproud_55876', maxLen)).toBe('noproud 55876');
+  });
+
+  test('корректно отображает проект без релиза', () => {
+    expect(formatPsRelease('my-app', '-', 7)).toBe('my-app  -');
+    expect(formatPsRelease('fresh-skeleton', '-', 14)).toBe('fresh-skeleton -');
+  });
+
+  test('извлекает хеш даже если имя релиза не повторяет имя проекта с подчеркиванием', () => {
+    expect(formatPsRelease('my-app', 'release_abc12', 6)).toBe('my-app abc12');
+  });
+
+  test('работает корректно если maxProjectLen опущен или меньше длины проекта', () => {
+    expect(formatPsRelease('app', 'app_12345')).toBe('app 12345');
   });
 });
 

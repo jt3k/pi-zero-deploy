@@ -281,7 +281,7 @@ describe('подкоманда ps', () => {
     expect(result.stderr).toContain('ssh');
   });
 
-  test('pizdeploy ps с флагом --ssh завершается кодом 0 и выводит таблицу без колонки Service', () => {
+  test('pizdeploy ps с флагом --ssh завершается кодом 0 и выводит таблицу без колонок Service и Project', () => {
     const sandbox = makeSandbox();
     // Переопределяем fake ssh, чтобы он возвращал валидный JSON массив для ps
     const sshStub = join(sandbox.base, 'fake-bin', 'ssh');
@@ -297,10 +297,12 @@ describe('подкоманда ps', () => {
       pathValue: sandbox.pathValue,
     });
     expect(result.code).toBe(0);
+    expect(result.stdout).toContain('Release');
     expect(result.stdout).toContain('test-app');
-    expect(result.stdout).toContain('test-app_123');
+    expect(result.stdout).toContain('123');
     expect(result.stdout).toContain('http://custom.local:1234');
     expect(result.stdout).toContain('111');
+    expect(result.stdout).not.toContain('Project');
     expect(result.stdout).not.toContain('Service');
   });
 
@@ -320,6 +322,23 @@ describe('подкоманда ps', () => {
     expect(result.stdout).toContain('http://zero.local:8080');
   });
 
+  test('pizdeploy ps выравнивает колонку Release для проектов разной длины', () => {
+    const sandbox = makeSandbox();
+    const sshStub = join(sandbox.base, 'fake-bin', 'ssh');
+    writeFileSync(
+      sshStub,
+      '#!/bin/sh\ncase "$*" in\n  *bash*|*python3*) echo \'[{"project":"kmp","release":"kmp_3ea25","status":"running","port":null,"pid":"23232"},{"project":"my-app","release":"my-app_00f62","status":"inactive","port":null,"pid":null},{"project":"noproud","release":"noproud_55876","status":"running","port":null,"pid":"23495"}]\' ;;\n  *) exit 0 ;;\nesac\n',
+    );
+    chmodSync(sshStub, 0o755);
+
+    const result = run({ args: ['ps'], cwd: sandbox.cwd, pathValue: sandbox.pathValue });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('kmp     3ea25');
+    expect(result.stdout).toContain('my-app  00f62');
+    expect(result.stdout).toContain('noproud 55876');
+    expect(result.stdout).not.toContain('Project');
+  });
+
   test('pizdeploy ps корректно отображает сервисы без слушающего порта (боты, воркеры)', () => {
     const sandbox = makeSandbox();
     const sshStub = join(sandbox.base, 'fake-bin', 'ssh');
@@ -332,7 +351,7 @@ describe('подкоманда ps', () => {
     const result = run({ args: ['ps'], cwd: sandbox.cwd, pathValue: sandbox.pathValue });
     expect(result.code).toBe(0);
     expect(result.stdout).toContain('noproud');
-    expect(result.stdout).toContain('noproud_45834');
+    expect(result.stdout).toContain('45834');
     expect(result.stdout).toContain('running');
     expect(result.stdout).toContain('9876');
     // URL должен быть '-'
@@ -657,7 +676,8 @@ describe('обнаружение процессов и состояний в ps'
 
     // «Нет релиза» и «релиз есть, не запущен» обязаны отличаться непустым релизом.
     expect(noRelease).not.toBe(stopped);
-    expect(stopped).toContain('stopped_ab12c');
+    expect(stopped).toContain('stopped');
+    expect(stopped).toContain('ab12c');
     expect(stopped).toContain('inactive');
     expect(running).toContain('http://zero.local:3000');
     expect(restarting).toContain('restarting');

@@ -38,7 +38,7 @@ export function detectAutobuildEntry(
   // Первый токен: если это node/bun рантайм, отсекаем его
   let isNodeRuntime = false;
   let startIndex = 0;
-  const first = stripQuotes(tokens[0]);
+  const first = tokens[0] ? stripQuotes(tokens[0]) : '';
   if (first === 'node' || first.endsWith('/node') || first === 'bun' || first.endsWith('/bun')) {
     isNodeRuntime = true;
     startIndex = 1;

@@ -209,8 +209,9 @@ export async function handleDeploy(options: DeployOptions): Promise<number> {
   try {
     // 1. Сборка
     let effectiveExecStart = execStart;
+    const pkgScripts = (pkg as { scripts?: Record<string, unknown> })?.scripts;
     const hasCustomBuild =
-      typeof pkg?.scripts?.build === 'string' && pkg.scripts.build.trim().length > 0;
+      typeof pkgScripts?.build === 'string' && pkgScripts.build.trim().length > 0;
 
     if (hasCustomBuild) {
       const buildResult = await withStep('сборка проекта', () => $`bun run build`.nothrow());

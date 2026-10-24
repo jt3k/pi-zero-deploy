@@ -1,340 +1,168 @@
-# pi zero deploy
+# pizdeploy
 
-## TL;DR
+[![CI](https://github.com/jt3k/pi-zero-deploy/actions/workflows/ci.yml/badge.svg)](https://github.com/jt3k/pi-zero-deploy/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/jt3k/pi-zero-deploy?color=blue&logo=github)](https://github.com/jt3k/pi-zero-deploy/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Bun](https://img.shields.io/badge/Bun-%3E%3D1.0-black?logo=bun)](https://bun.sh)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Raspberry%20Pi-E43E56?logo=raspberrypi)](https://www.raspberrypi.com/)
 
-**Vercel-подобный деплой для Raspberry Pi и домашних Linux-серверов.** Забудьте про Docker на 512 МБ памяти, настройку PM2 и бесконечный `npm install` по SSH.
+> **One-command deploys for your Raspberry Pi.** Build on your laptop, ship atomically,
+> health-check, auto-rollback if it breaks. No Docker, no sudo, no SSH `npm install`.
+> Developed against a 512 MB Pi Zero — works on **any Linux with systemd**
+> (Debian, Ubuntu, Arch, Orange Pi, a $1 VPS, an old netbook).
 
-Заходите в папку проекта, вводите `pizdeploy` — утилита соберёт проект на вашем Mac/ПК, доставит на плату, атомарно переключит версию и проверит, что сервис реально поднялся.
+![demo](demo.gif)
 
-<img src="./demo.gif" alt="pizdeploy demo" width="100%" />
+---
 
-### Почему это удобно:
+## Quickstart (60 seconds)
 
-- ⚡ **Одна команда:** полный цикл деплоя за секунды прямо из локального терминала.
-- 🛡️ **Zero-Privilege:** работает через `systemctl --user`. Никакого `root`, никаких паролей `sudo` — систему сломать невозможно.
-- 🪶 **0% лишней нагрузки на сервер:** тяжёлая сборка идёт на машине разработчика; плата не греется и не вылетает по памяти (OOM).
-- 🔄 **Автооткат и самолечение:** если новый билд крашнется на старте — `pizdeploy` мгновенно вернёт прошлый релиз; если упадёт позже — systemd сам перезапустит процесс.
-- 📊 **Мониторинг без захода по SSH:** порты, логи, кликабельные URL и статусы прямо под рукой (`pizdeploy ps`, `pizdeploy logs`).
+```bash
+# 1. Install (pick one)
+bun add -g github:jt3k/pi-zero-deploy
+# or, once published: npm install -g pizdeploy
 
-> 💡 **Почему такое название?** Всё буквально: автор реально крутит свои Node-сервисы на Raspberry Pi Zero со скромными 512 МБ ОЗУ. Если инструмент без проблем справляется на микрокомпьютере с ARMv6 — на любом более мощном одноплатнике или обычном сервере он будет летать подавно.
-
-## О проекте
-
-**pi zero deploy** (утилита командной строки `pizdeploy`) — инструмент для zero-privilege деплоя Node.js и TypeScript приложений на Raspberry Pi и одноплатные компьютеры: собирает проект, упаковывает артефакты `dist/`, вычисляет детерминированный хэш архива, атомарно разворачивает новую версию и **проверяет, что служба действительно работает**.
-
-Утилита работает исключительно от имени обычного непривилегированного пользователя — права `root` и `sudo` на целевом устройстве не требуются.
-
-## Основные возможности
-
-- **Zero-Privilege**: деплой и управление через пользовательский менеджер systemd (`systemctl --user`), без `sudo`.
-- **Универсальность пользователей**: совместимость с современными дистрибутивами Raspberry Pi OS (где нет пользователя `pi` по умолчанию) и любыми другими Linux-системами через `%h/projects` и `$HOME/projects`.
-- **Атомарные релизы и откат**: переключение симлинка `current` на новый релиз с автоматическим откатом на предыдущую рабочую версию при сбое запуска.
-- **Верификация работоспособности**: проверка реального перехода службы в статус `active`, контроль слушающего порта (`ss -tln`) и выдержка стабильности (`NRestarts`).
-- **Автоматическая сборка (autobuild)**: если в проекте нет команды `build`, `pizdeploy` автоматически соберет входной JS/TS файл из `scripts.start` через `bun build --minify`.
-- **Инспекция и мониторинг (`pizdeploy ps`)**: таблица всех запущенных сервисов, версий релизов, портов (с кликабельными URL) и PID процессов.
-- **Управление службами**: `start`, `stop`, `restart`, `status`, `logs`, `disable`, `remove` прямо из терминала разработчика.
-
-## Требования
-
-- macOS / Linux (POSIX-оболочка).
-- Рантайм [Bun](https://bun.sh) (1.0+) в `PATH`.
-- Системные клиенты `ssh` и `scp` (OpenSSH) в `PATH`.
-- Настроенный доступ по SSH-ключу к целевому устройству (`ssh-copy-id <user@host>`). Интерактивный ввод пароля не поддерживается (`BatchMode=yes`).
-- Сборка проекта: команда `bun run build` (собирает артефакты в `dist/`) либо скрипт `scripts.start`, указывающий на входной JS/TS файл (в этом случае `pizdeploy` соберёт проект автоматически через `bun build`).
-- На целевом хосте: Linux с `systemd` (пользовательский менеджер `systemctl --user`) и Node.js по пути `/usr/bin/node`.
-
-## Установка
-
-```sh
-bun install
-bun link
-```
-
-`bun link` создаёт симлинк `~/.bun/bin/pizdeploy`. Каталог `~/.bun/bin` должен быть в `PATH`.
-
-## Использование
-
-```sh
-# Показать справку по всем командам и опциям
-pizdeploy --help
-pizdeploy -h
-
-# Показать текущую версию
-pizdeploy --version
-pizdeploy -v
-
-# Деплой на хост по умолчанию (pi@zero.local или из package.json)
-pizdeploy
-
-# Деплой с явным указанием хоста и пользователя
-pizdeploy --ssh myuser@rpi4.local
-pizdeploy --ssh=myuser@rpi4.local
-
-# Предварительный просмотр без сборки и отправки по сети
-pizdeploy --dry-run
-pizdeploy --dry-run --ssh myuser@rpi4.local
-
-# Создание шаблона службы в проекте
+# 2. (Optional) Scaffold systemd unit template for custom env & restart policies
+cd my-app
 pizdeploy init
 
-# Инспекция статуса запущенных сервисов на целевом хосте
-pizdeploy ps
-pizdeploy ps --ssh myuser@rpi4.local
-
-# Управление жизненным циклом службы (по умолчанию — имя текущего проекта)
-pizdeploy start [name]
-pizdeploy stop [name]
-pizdeploy restart [name]
-pizdeploy status [name]
-pizdeploy logs [name]
-pizdeploy disable [name]
-pizdeploy remove [name]   # или pizdeploy rm [name]
+# 3. Deploy
+pizdeploy --ssh pi@raspberrypi.local
+# or set "pizdeploy": { "ssh": "pi@raspberrypi.local" } in package.json and just run:
+pizdeploy
 ```
 
-## Безопасность
+`pizdeploy` builds locally on your Mac/PC, uploads the artifact, atomically switches the
+`current` symlink, reloads & starts `systemd --user`, verifies port & liveness, and automatically rolls back if the service fails.
 
-Проект разработан с фокусом на минимальные привилегии и безопасность работы:
+---
 
-1. **Zero-Privilege архитектура**:
-   - Никаких вызовов `sudo` или доступа к `/etc/systemd/system`.
-   - Службы запускаются в изоляции пользовательской сессии systemd (`systemctl --user`).
-   - Автозапуск сессии настраивается через непривилегированный `loginctl enable-linger <user>`.
+## Why pizdeploy?
 
-2. **Работа с секретами и токенами**:
-   - **Не храните пароли, токены API и приватные ключи в открытом репозитории!**
-   - Укажите переменные окружения и секреты в локальном файле `systemd-unit.service` проекта (создается командой `pizdeploy init`):
-     ```ini
-     [Service]
-     Environment="BOT_TOKEN=123456:ABC-DEF..."
-     Environment="DB_PASSWORD=secret..."
-     ```
-   - Либо используйте файл окружения на целевом хосте:
-     ```ini
-     [Service]
-     EnvironmentFile=%h/.config/my-app.env
-     ```
-   - **Рекомендация по `.gitignore`**: если файл `systemd-unit.service` содержит приватные токены, добавьте его в `.gitignore` вашего приложения и создайте шаблон `systemd-unit.service.example` без конфиденциальных данных.
+| Criterion              | pizdeploy                                                   | Docker                            | PM2                                     |
+| ---------------------- | ----------------------------------------------------------- | --------------------------------- | --------------------------------------- |
+| Background agent       | **none** (0 MB overhead)                                    | yes (`dockerd`, 100–250+ MB)      | yes (PM2 daemon, 40–80 MB)              |
+| Build on host          | **no** (build on Mac/PC)                                    | yes or via Hub                    | yes (heavy `npm i`)                     |
+| Needs root / sudo      | **no** (`systemd --user`)                                   | yes (or `docker` group)           | no                                      |
+| Atomic release         | **yes** (symlink switch)                                    | yes (container)                   | no (in-place code)                      |
+| Auto-rollback on crash | **yes** (active + port probe)                               | via orchestrator                  | no (crash loop)                         |
+| Host dependencies      | Linux + `systemd`                                           | Docker daemon                     | Node.js + npm                           |
+| Honest trade-offs      | Linux + systemd only, single host, no built-in secret vault | High overhead, slow builds on ARM | No auto-rollback, `npm i` leaks on host |
 
-3. **Защита от инъекций и подмены путей**:
-   - Аргументы хоста (`--ssh`) и имена служб валидируются: запрещены спецсимволы shell, пробелы, переводы строк и ведущие дефисы (предотвращение атак внедрения параметров в SSH).
-   - Тело unit-файла передается на хост через Base64-поток (`echo '<b64>' | base64 -d > ...`), исключая проблемы с экранированием shell и маркерами heredoc.
-   - Упаковка выполняется в системный временный каталог (`tmpdir`) с уникальным идентификатором процесса, исключая риск повреждения или перезаписи локальных файлов проекта.
+**In one line:** Docker is too heavy for 512 MB, PM2 needs `npm install` on the device
+and can't roll back, so `pizdeploy` builds on your laptop, ships atomically, and
+uses native `systemd --user` — no sudo, no daemon, no surprises.
 
-## Конвейер деплоя
+---
 
-Все удалённые операции выполняются от имени подключаемого пользователя. Каждый шаг — отдельный вызов по переиспользованному SSH-соединению (`ControlMaster`), и ненулевой код возврата любого критического шага немедленно прерывает деплой.
+## Configuration
 
-1. **Сборка** — запускает `bun run build` в текущем каталоге (если скрипт `build` объявлен в `package.json`) либо автоматически собирает входной JS/TS файл из `scripts.start` через `bun build <entry> --target=node --outfile=./dist/<name>.mjs --minify`.
-2. **Упаковка** — упаковывает содержимое папки `dist/` во временный системный архив `tmpdir()/pizdeploy-<timestamp>-<uuid>.tar.gz`.
-3. **Хэширование** — вычисляет SHA-256 от архива, берёт первые 5 символов (`<hash5>`).
-4. **Доставка** — копирует архив через `scp` во временную буферную директорию `$HOME/projects/<name>/incoming/dist.tar.gz`.
-5. **Автозапуск сессии (linger)** — перед установкой юнита проверяется `loginctl show-user <user> --property=Linger`; если выключено, включается `loginctl enable-linger <user>`. Без этого служба завершается при выходе пользователя из SSH.
-6. **Распаковка** — создаёт директорию релиза `$HOME/projects/<name>/releases/<name>_<hash5>`, распаковывает архив туда и удаляет временный файл из `incoming/`. Симлинк `current` на этом шаге не трогается.
-7. **Атомарное переключение** — атомарная замена симлинка (`ln -sfn` + `mv -fT`) переводит `$HOME/projects/<name>/current` на новую директорию.
-8. **Установка юнита** — unit-файл с директивой `WorkingDirectory=%h/projects/<name>/current` безопасно доставляется в `~/.config/systemd/user/<service>`, вызывается `systemctl --user daemon-reload`, и служба активируется: `systemctl --user enable --now <service> && systemctl --user restart <service>`.
-9. **Верификация** — деплой считается завершенным только после подтверждения реальной работы службы. При сбое `current` возвращается на предыдущий релиз, а каталог упавшего релиза сохраняется для последующего анализа.
-10. **Безопасная ротация** — очищает старые релизы из `releases/`, сохраняя 3 самые свежие версии по времени изменения (`mtime`). Активный релиз, на который указывает симлинк `current`, гарантированно защищён от удаления независимо от хэша или порядка имён.
-11. **Очистка** — удаляет локальный временный архив из системного каталога `tmpdir()`.
-
-### Верификация и таймаут
-
-`Type=simple` означает, что systemd считает службу `active` сразу после `fork`, ещё до фактического открытия сокета или инициализации приложения. Поэтому успех подтверждается дополнительно:
-
-| Конфигурация           | Условие успеха                                                                 |
-| ---------------------- | ------------------------------------------------------------------------------ |
-| задан `pizdeploy.port` | служба в состоянии `active` **и** порт слушается (`ss -tln`)                   |
-| порт не задан          | служба в состоянии `active` **и** счётчик `NRestarts` не вырос за выдержку 5 с |
-
-Опрос идёт с интервалом 1 с, общий таймаут — **60 с**.
-На Raspberry Pi Zero прямой запуск `node` поднимает приложение за ~5 с (в отличие от npm, требовавшего до 30 с).
-
-При отказе в stderr выводится точная причина: неполученный `active`, непрослушиваемый порт (с перечнем фактически открытых портов на хосте) или рост `NRestarts` как признак падения приложения. При сбое первого деплоя симлинк `current` удаляется (исключая зацикливание), а при наличии предыдущего релиза — возвращается на него.
-
-### Структура каталогов на хосте
-
-```
-$HOME/projects/<name>/
-├── incoming/                         ← временный буфер (пуст после завершения деплоя)
-├── releases/                         ← хранилище версий проекта
-│   ├── <name>_abc12/                 ← старый релиз (будет удалён при ротации)
-│   ├── <name>_def34/                 ← предыдущий релиз
-│   └── <name>_5fa9b/                 ← текущий активный релиз
-└── current -> releases/<name>_5fa9b/ ← симлинк на активную версию
-```
-
-## Конфигурация проекта
-
-Параметры считываются из `package.json` текущего рабочего каталога:
+Configure options directly in your `package.json`:
 
 ```json
 {
-  "name": "my-project",
+  "name": "my-app",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js"
   },
   "pizdeploy": {
-    "ssh": "myuser@rpi4.local",
+    "ssh": "pi@zero.local",
     "service": "my-app.service",
-    "port": 1234
+    "port": 3000
   }
 }
 ```
 
-### Адрес хоста (`--ssh`)
+- **`scripts.start`** _(required)_: Command executed on the target host. Path prefixes like `dist/` are automatically adapted for the release directory.
+- **`scripts.build`** _(optional)_: Local build command. If omitted, `pizdeploy` automatically bundles your `scripts.start` entrypoint via `bun build --minify`.
+- **`pizdeploy.ssh`** _(optional)_: Target host address for any Raspberry Pi or Linux VPS (override via `--ssh user@host`, default: `pi@zero.local`).
+- **`pizdeploy.port`** _(optional)_: Port to verify via `ss -tln`. If omitted (e.g. bots or workers), liveness is verified by monitoring service stability and `NRestarts`.
+- **`pizdeploy.service`** _(optional)_: Systemd unit name (defaults to `<name>.service`).
 
-Приоритет источников:
+---
 
-1. Флаг `--ssh <user@host>` командной строки.
-2. Поле `pizdeploy.ssh` в `package.json`.
-3. Значение по умолчанию: `pi@zero.local`.
+## Commands
 
-### `pizdeploy.service`
+| Command                       | What it does                                                               |
+| ----------------------------- | -------------------------------------------------------------------------- |
+| `pizdeploy`                   | Build, deliver, atomically switch, and verify deployment                   |
+| `pizdeploy --ssh user@host`   | One-shot deploy to a remote host over SSH                                  |
+| `pizdeploy --dry-run`         | Preview steps without building or network calls                            |
+| `pizdeploy init`              | Scaffold `systemd-unit.service` template in the project                    |
+| `pizdeploy ps`                | Inspect deployed projects, active releases, URLs, and statuses             |
+| `pizdeploy logs [name]`       | Tail the last 50 log lines via `journalctl --user`                         |
+| `pizdeploy start [name]`      | Start the user systemd service                                             |
+| `pizdeploy stop [name]`       | Stop the user systemd service                                              |
+| `pizdeploy restart [name]`    | Restart the user systemd service                                           |
+| `pizdeploy status [name]`     | Show detailed `systemctl --user status`                                    |
+| `pizdeploy remove\|rm [name]` | ⚠️ **Destructive:** Stop, disable, remove systemd unit and current release |
 
-Имя systemd-юнита. По умолчанию формируется из поля `name` пакета (`app.service`, если имя не задано). Суффикс `.service` добавляется автоматически.
+---
 
-### `pizdeploy.port`
+## Security notes
 
-Необязательный номер порта, который ожидает приложение. Используется для верификации и для колонки `URL` в `pizdeploy ps`. Передаётся в процесс приложения как переменная окружения `PORT`.
+- **Zero-Privilege**: Runs entirely under user mode via `systemctl --user`. Never calls `sudo` and never touches `/etc/systemd/system`.
+- **Environment & Secrets**: Store secrets in local `systemd-unit.service` (`Environment="KEY=..."`) or target host `EnvironmentFile=%h/.config/my-app.env`. Never commit secrets to git!
+- **Safe Transport**: Unit definitions are transferred via Base64 stream to prevent shell injection, host arguments are sanitized against SSH parameter injection.
 
-- **Порт задан** — деплой считается успешным, только если порт реально слушается процессом. Если по истечении таймаута порт закрыт, деплой завершается ошибкой с выводом открытых портов.
-- **Порт не задан** — проверка порта пропускается; статус проверяется по состоянию службы и счетчику перезапусков `NRestarts` (подходит для ботов, воркеров и фоновых сервисов).
+---
 
-### Канон запуска
+<details>
+<summary><b>How the deploy pipeline works (11 steps, under the hood)</b></summary>
 
-Для деплоя проект **обязан** объявлять непустой скрипт `scripts.start` в своём `package.json` (например, `"start": "node dist/index.js"`). Если скрипт отсутствует или пуст, утилита выводит понятную ошибку и завершает работу:
+1. **Build locally** — `bun run build` or automatic `bun build` entry bundle on your laptop.
+2. **Pack artifact** — bundles `dist/` into a temporary archive in OS `tmpdir()`.
+3. **Hash** — calculates SHA-256 content hash (first 5 chars: `<hash5>`).
+4. **Transport** — transfers archive via `scp` to `$HOME/projects/<name>/incoming/`.
+5. **Session linger** — verifies `loginctl enable-linger` so services survive SSH disconnects.
+6. **Unpack** — extracts to `$HOME/projects/<name>/releases/<name>_<hash5>`.
+7. **Atomic switch** — updates symlink `$HOME/projects/<name>/current` atomically.
+8. **Unit setup** — installs unit into `~/.config/systemd/user/<service>`, runs `daemon-reload`, enables and starts service.
+9. **Verification** — checks `active` state, verifies listening port or checks that `NRestarts` remains 0.
+10. **Auto-rollback** — on verification failure, points `current` back to previous working release and preserves failed directory for debugging.
+11. **Safe rotation** — keeps 3 newest releases by mtime, guaranteed not to delete active `current`.
 
-```text
-pizdeploy: в package.json отсутствует обязательный скрипт 'scripts.start'
-```
+</details>
 
-Юнит запускает процесс напрямую через `ExecStart` (без `npm start`), адаптируя пути под распакованный каталог релиза (префикс `dist/` удаляется, бинарник `node` приводится к `/usr/bin/node`).
+<details>
+<summary><b>Exit codes</b></summary>
 
-## Шаблон systemd-юнита (`systemd-unit.service`)
+| Code  | Meaning                                                                     |
+| ----- | --------------------------------------------------------------------------- |
+| `0`   | Success (deployment verified, or informational command like `ps`, `--help`) |
+| `1`   | Service not found, or verification failed (rolled back to previous release) |
+| `2`   | CLI usage error (invalid host, unknown flag or subcommand)                  |
+| `127` | Missing `ssh` or `scp` in `PATH`                                            |
 
-Утилита формирует unit-файл и сохраняет его на хосте в `~/.config/systemd/user/<service>`.
+</details>
 
-По умолчанию используется встроенный шаблон:
-
-```ini
-[Unit]
-Description=app
-After=default.target
-
-[Service]
-Type=simple
-Restart=always
-RestartSec=2
-Environment="NODE_ENV=production"
-
-[Install]
-WantedBy=default.target
-```
-
-### Инициализация шаблона в проекте (`pizdeploy init`)
-
-Если проекту требуются специальные переменные окружения, аргументы или зависимости, создайте шаблон команды в проекте:
-
-```sh
-pizdeploy init
-```
-
-Команда:
-
-1. Находит `package.json` в текущем каталоге.
-2. Подставляет имя проекта из `package.json` в описание сервиса.
-3. Добавляет подсказки для переменных окружения (`# Environment="BOT_TOKEN=..."`).
-4. Не перезаписывает существующий файл `systemd-unit.service`.
-
-Вам **не нужно** вручную прописывать `WorkingDirectory` и `ExecStart`: `pizdeploy` автоматически подставит `WorkingDirectory=%h/projects/<name>/current` и команду запуска из `scripts.start`.
-
-Пример для Telegram-бота:
-
-```ini
-[Unit]
-Description=My Telegram Bot
-After=default.target
-
-[Service]
-Type=simple
-Restart=always
-RestartSec=2
-Environment="NODE_ENV=production"
-Environment="BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
-
-[Install]
-WantedBy=default.target
-```
-
-При деплое этот шаблон будет автоматически дополнен актуальными строками:
-
-```ini
-WorkingDirectory=%h/projects/tg-bot/current
-ExecStart=/usr/bin/node index.js
-```
-
-## Инспекция сервисов (`pizdeploy ps`)
-
-Команда `pizdeploy ps` опрашивает целевой хост без привилегий суперпользователя и выводит таблицу проектов:
-
-```sh
-pizdeploy ps
-```
-
-```text
-┌───┬────────────────────────┬────────────┬────────────────────────┬──────┐
-│   │ Release                │ Status     │ URL                    │ PID  │
-├───┼────────────────────────┼────────────┼────────────────────────┼──────┤
-│ 0 │ my-app           ee3d8 │ running    │ http://rpi4.local:1234 │ 7915 │
-│ 1 │ weather-bot      a1b2c │ restarting │ -                      │ -    │
-│ 2 │ fresh-skeleton       - │ inactive   │ -                      │ -    │
-└───┴────────────────────────┴────────────┴────────────────────────┴──────┘
-```
-
-- **Release** — имя проекта (выровнено слева) и хеш активного релиза (справа). Прочерк (`-`) означает, что релиз еще не создан.
-- **Status** — текущее состояние службы:
-  - `running` — служба активна и работает (слушает TCP-порт или активна в systemd);
-  - `restarting` — служба находится в цикле перезапуска systemd (`activating` / `auto-restart`);
-  - `failed` — служба завершилась аварийным сбоем (`failed`);
-  - `inactive` — служба остановлена.
-- **URL** — `http://<host>:<port>` для веб-сервисов со слушающим портом (кликабельна).
-- **PID** — идентификатор активного процесса.
-
-## Управление службами
-
-- `pizdeploy start [name]` — запустить службу (`systemctl --user start <service>`).
-- `pizdeploy stop [name]` — остановить службу (`systemctl --user stop <service>`).
-- `pizdeploy restart [name]` — перезапустить службу (`systemctl --user restart <service>`).
-- `pizdeploy status [name]` — показать статус systemd (`systemctl --user status <service>`).
-- `pizdeploy logs [name]` — показать последние 50 строк журнала (`journalctl --user -u <service> -n 50 --no-pager`).
-- `pizdeploy disable [name]` — отключить автозапуск (`systemctl --user disable <service>`).
-- `pizdeploy remove [name]` (или `rm`) — остановить, отключить автозапуск, удалить unit-файл и снять с учёта симлинк `current`.
-
-## Режим предварительного просмотра (`--dry-run`)
-
-Выводит план действий без вызова сборщика и без обращения по сети:
+<details>
+<summary><b>Directory layout on the host</b></summary>
 
 ```
-[Dry-Run] Будет запущен bun run build, вычислен хэш архива и развернут релиз в: $HOME/projects/my-project/releases/my-project_mock5
-[Dry-Run] Служба my-project.service (user-юнит): /usr/bin/node index.js в $HOME/projects/my-project/current, проверка порта 1234
+$HOME/projects/<name>/
+├── incoming/                         # Temporary buffer (cleaned up after deploy)
+├── releases/
+│   ├── <name>_abc12/                 # Previous release
+│   └── <name>_5fa9b/                 # Current active release
+└── current -> releases/<name>_5fa9b/ # Symlink to active version
 ```
 
-## Коды возврата
+Unit files live in `~/.config/systemd/user/<service>.service`.
 
-- `0` — служба успешно развернута и проверена, либо информационная команда выполнена успешно (`--help`, `--version`, `ps`, `init`).
-- `1` — служба не найдена на хосте, либо верификация деплоя завершилась неудачей (симлинк `current` возвращён на предыдущий рабочий релиз).
-- `2` — ошибка использования CLI (неизвестная команда, невалидный аргумент хоста или службы).
-- `127` — не найден `ssh` или `scp` в `PATH`.
-- Иной код — код завершения неудачного шага удаленного конвейера.
+</details>
 
-## Тестирование
+---
 
-```sh
-bun test
-```
+## Requirements
 
-Тестовый набор полностью изолирован от внешней сети: сетевые утилиты и удаленный хост моделируются в песочнице с проверкой граничных условий и устойчивости к сбоям.
+- **Local:** macOS / Linux, [Bun](https://bun.sh) ≥ 1.0, OpenSSH (`ssh`, `scp`).
+- **Target Host:** Linux with `systemd` (`systemctl --user`), Node.js at `/usr/bin/node`.
+- **Access:** SSH key access (`ssh-copy-id`). Password prompts are not supported (`BatchMode=yes`).
 
-## Лицензия
+---
 
-MIT
+## License
+
+MIT © [jt3k](https://github.com/jt3k)

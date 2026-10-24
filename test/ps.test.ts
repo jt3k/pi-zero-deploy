@@ -2,9 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { buildPsScript } from '../src/index';
 
 describe('buildPsScript', () => {
-  test('содержит сопоставление состояний active, activating и failed', () => {
+  test('содержит сопоставление состояний active, activating и failed с учётом LoadState', () => {
     const script = buildPsScript();
-    expect(script).toContain('systemctl --user show "${name}.service" -p ActiveState -p MainPID');
+    expect(script).toContain(
+      'systemctl --user show "${name}.service" -p ActiveState -p MainPID -p LoadState',
+    );
+    expect(script).toContain('[[ "$k" == "LoadState" ]] && load_state="$v"');
+    expect(script).toContain('if [[ "$load_state" != "not-found" ]]; then');
     expect(script).toContain(
       '[[ "$astate" == "active" && "$main_pid" =~ ^[0-9]+$ && "$main_pid" -gt 0 ]]',
     );
@@ -15,9 +19,11 @@ describe('buildPsScript', () => {
     expect(script).toContain('stat="failed"');
   });
 
-  test('не пропускает службы в состоянии restarting или failed даже при отсутствии current', () => {
+  test('не пропускает службы в состоянии restarting или failed при наличии загруженного юнита даже без current', () => {
     const script = buildPsScript();
-    expect(script).toContain('[[ $has_current -eq 0 && "$stat" == "inactive" ]] && continue');
+    expect(script).toContain(
+      '[[ $has_current -eq 0 && ( "$stat" == "inactive" || "$load_state" == "not-found" ) ]] && continue',
+    );
   });
 });
 

@@ -38,6 +38,7 @@ systemctl --user stop ${service} 2>/dev/null || true
 systemctl --user disable ${service} 2>/dev/null || true
 rm -f ~/.config/systemd/user/${service}
 systemctl --user daemon-reload
+systemctl --user reset-failed ${service} 2>/dev/null || true
 rm -f ${REMOTE_PROJECTS_ROOT}/${proj}/current
 `;
       const startRemove = performance.now();

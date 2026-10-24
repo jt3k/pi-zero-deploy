@@ -577,6 +577,9 @@ describe('подкоманды stop и disable', () => {
         true,
       );
       expect(calls.some((c) => c.includes('systemctl --user daemon-reload'))).toBe(true);
+      expect(calls.some((c) => c.includes('systemctl --user reset-failed my-app.service'))).toBe(
+        true,
+      );
       expect(calls.some((c) => c.includes('rm -f $HOME/projects/my-app/current'))).toBe(true);
       expect(result.stdout).toContain(
         '🗑 Служба my-app.service удалена и снята с учёта на pi@zero.local',

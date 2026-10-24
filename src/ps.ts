@@ -32,23 +32,27 @@ for p in "$projects_dir"/*; do
       break
     fi
   done
+  load_state=""
   if [[ "$stat" == "inactive" ]]; then
     astate=""
     main_pid="0"
     while IFS="=" read -r k v; do
       [[ "$k" == "ActiveState" ]] && astate="$v"
       [[ "$k" == "MainPID" ]] && main_pid="$v"
-    done < <(systemctl --user show "\${name}.service" -p ActiveState -p MainPID 2>/dev/null)
-    if [[ "$astate" == "active" && "$main_pid" =~ ^[0-9]+$ && "$main_pid" -gt 0 ]]; then
-      stat="running"
-      m_pid="$main_pid"
-    elif [[ "$astate" == "activating" ]]; then
-      stat="restarting"
-    elif [[ "$astate" == "failed" ]]; then
-      stat="failed"
+      [[ "$k" == "LoadState" ]] && load_state="$v"
+    done < <(systemctl --user show "\${name}.service" -p ActiveState -p MainPID -p LoadState 2>/dev/null)
+    if [[ "$load_state" != "not-found" ]]; then
+      if [[ "$astate" == "active" && "$main_pid" =~ ^[0-9]+$ && "$main_pid" -gt 0 ]]; then
+        stat="running"
+        m_pid="$main_pid"
+      elif [[ "$astate" == "activating" ]]; then
+        stat="restarting"
+      elif [[ "$astate" == "failed" ]]; then
+        stat="failed"
+      fi
     fi
   fi
-  [[ $has_current -eq 0 && "$stat" == "inactive" ]] && continue
+  [[ $has_current -eq 0 && ( "$stat" == "inactive" || "$load_state" == "not-found" ) ]] && continue
   [[ $first -eq 0 ]] && printf ","
   first=0
   printf "{\\"project\\":\\"%s\\",\\"release\\":\\"%s\\",\\"status\\":\\"%s\\",\\"port\\":%s,\\"pid\\":%s}" \
